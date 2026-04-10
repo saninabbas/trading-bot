@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Futures Bot — Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body class="">
+
+  <!-- ══ PIN LOCK OVERLAY ══ -->
+  <div id="pin-overlay" class="pin-overlay" style="display:none;">
+    <div class="pin-box">
+      <div class="pin-icon">🔒</div>
+      <h2>Security Lock</h2>
+      <p>Enter your 4-digit PIN to access the bot</p>
+      <div class="pin-input-wrap">
+        <input type="password" id="pin-input" maxlength="4" placeholder="••••" autofocus>
+      </div>
+      <button id="unlock-btn" class="unlock-btn">UNLOCK DASHBOARD</button>
+      <div id="pin-error" class="pin-error">Invalid PIN. Try again.</div>
+    </div>
+  </div>
+
+<div class="dashboard-layout">
+
+  <!-- ══ SIDEBAR ══ -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div style="display:flex; align-items:center; gap:12px">
+        <img src="icon.png" style="width:40px;height:40px;border-radius:10px;border:1px solid var(--border)" alt="logo">
+        <div>
+          <h1 style="font-size:16px;line-height:1">FUTURES AI</h1>
+          <p style="font-size:9px;color:var(--muted);letter-spacing:1px;margin-top:4px">PRO TRADER EDITION</p>
+        </div>
+      </div>
+    </div>
+    <nav class="nav-links">
+      <div class="nav-link active" data-page="overview">
+        <span class="nav-icon">📊</span> Overview
+      </div>
+      <div class="nav-link" data-page="bot">
+        <span class="nav-icon">🤖</span> Bot Control
+      </div>
+      <div class="nav-link" data-page="trades">
+        <span class="nav-icon">📋</span> Trade Log
+      </div>
+      <div class="nav-link" data-page="settings">
+        <span class="nav-icon">⚙️</span> API Settings
+      </div>
+    </nav>
+    <div class="sidebar-spacer"></div>
+    <div class="mode-switcher-wrap">
+      <div class="mode-label">DASHBOARD STYLE</div>
+      <div class="mode-toggle-btns">
+        <button id="mode-pro-btn" class="mode-btn active" data-mode="pro">EXPERT</button>
+        <button id="mode-lite-btn" class="mode-btn" data-mode="lite">EASY</button>
+      </div>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="bot-run-status">
+        <div id="sb-dot" class="dot-sm off"></div>
+        <div>
+          <div style="font-size:11px;font-weight:700" id="sb-status">Bot Offline</div>
+          <div style="font-size:10px;color:var(--muted)" id="sb-strategy">No strategy</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══ MAIN ══ -->
+  <div class="main-content">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <h2 id="page-title">Overview</h2>
+        <p id="page-subtitle">Live trading dashboard</p>
+      </div>
+      <div class="topbar-right">
+        <div class="badge-live">
+          <div class="dot-sm on"></div>
+          BINANCE FUTURES
+        </div>
+        <div id="db-time" style="font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace"></div>
+      </div>
+    </header>
+
+    <!-- ══ PAGE: OVERVIEW ══ -->
+    <div class="page active" id="page-overview">
+      <!-- Stat Cards -->
+      <div class="stat-grid">
+        <div class="stat-card green-glow">
+          <div class="stat-card-label">TOTAL BALANCE</div>
+          <div class="stat-card-value green-val" id="d-balance">0.00</div>
+          <div class="stat-card-sub" style="color:var(--muted)">USDT</div>
+        </div>
+        <div class="stat-card cyan-glow">
+          <div class="stat-card-label">TODAY P&amp;L</div>
+          <div class="stat-card-value cyan-val" id="d-pnl">+0.00</div>
+          <div class="stat-card-sub up" id="d-pnl-pct">+0.00%</div>
+        </div>
+        <!-- PnL Chart Card -->
+        <div class="stat-card chart-card">
+          <div class="stat-card-label">PROFIT TREND</div>
+          <canvas id="pnl-chart" width="200" height="60"></canvas>
+        </div>
+        <div class="stat-card amber-glow">
+          <div class="stat-card-label">WIN RATE</div>
+          <div class="stat-card-value amber-val" id="d-winrate">—</div>
+          <div class="stat-card-sub" style="color:var(--muted)" id="d-winrate-sub">0W / 0L</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">TOTAL TRADES</div>
+          <div class="stat-card-value" id="d-total-trades">0</div>
+          <div class="stat-card-sub" style="color:var(--muted)" id="d-active-sub">0 active</div>
+        </div>
+      </div>
+      <!-- Trade Controls -->
+      <div class="controls-grid">
+        <div class="control-card">
+          <div class="control-title">⚙️ TRADE SETTINGS</div>
+          <div class="form-group">
+            <label class="form-label">Symbol</label>
+            <select id="d-symbol" class="form-select">
+              <option>BTCUSDT</option>
+              <option>ETHUSDT</option>
+              <option>BNBUSDT</option>
+              <option>SOLUSDT</option>
+              <option>XRPUSDT</option>
+              <option>DOGEUSDT</option>
+              <option>AVAXUSDT</option>
+              <option>LTCUSDT</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Trade Amount (USDT)</label>
+              <input type="number" id="d-amount" class="form-input" value="50" min="5">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Risk per Trade %</label>
+              <input type="number" id="d-risk" class="form-input" value="2" min="0.5" max="10" step="0.5">
+            </div>
+          </div>
+          <div class="form-group" style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+            <input type="checkbox" id="d-auto-compound" style="width:18px; height:18px; accent-color:var(--green);">
+            <label class="form-label" style="margin-bottom:0; cursor:pointer;" for="d-auto-compound">Auto-Compounding (Grow Balance)</label>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mode</label>
+            <select id="d-mode" class="form-select">
+              <option value="paper">📄 Paper Trading (Safe)</option>
+              <option value="live">🔴 Live Trading (Real Money)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Daily Profit Target %</label>
+              <input type="number" id="d-daily-target" class="form-input" value="20" min="0" step="1">
+            </div>
+            <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end; padding-bottom:10px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                 <input type="checkbox" id="d-auto-switch" style="width:16px; height:16px; accent-color:var(--cyan);">
+                 <label class="form-label" style="margin-bottom:0; cursor:pointer;" for="d-auto-switch">Auto-Switch (on SL)</label>
+              </div>
+            </div>
+          </div>
+          <div class="manual-actions">
+            <button id="manual-long-btn" class="btn-manual long">LONG / BUY 📈</button>
+            <button id="manual-short-btn" class="btn-manual short">SHORT / SELL 📉</button>
+          </div>
+        </div>
+
+        <div class="control-card">
+          <div class="control-title">🎯 LEVERAGE CONTROL</div>
+          <div class="lever-display" id="lever-val">5x</div>
+          <input type="range" id="lever-range" min="1" max="20" value="5">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px">
+            <span>1x (Safe)</span><span>20x (Max)</span>
+          </div>
+          <div class="form-group" style="margin-top:16px">
+            <label class="form-label">Stop Loss %</label>
+            <input type="number" id="d-sl" class="form-input" value="1.5" step="0.5" min="0.5">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Trailing SL % (0 = Off)</label>
+            <input type="number" id="d-tsl" class="form-input" value="0.5" step="0.1" min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Take Profit %</label>
+            <input type="number" id="d-tp" class="form-input" value="3" step="0.5" min="1">
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Position (PRO/EXPERT Mode) -->
+      <div id="active-position-wrap" style="display:none; margin-bottom: 24px;">
+        <div class="active-card">
+          <div class="active-header">
+            <div class="active-title">
+              <span id="ap-badge" class="pos-badge">LONG</span>
+              <span id="ap-symbol">BTCUSDT</span>
+              <span class="active-live-indicator">● LIVE</span>
+            </div>
+            <button id="close-pos-btn">✖ CLOSE POSITION</button>
+          </div>
+          <div class="active-body">
+            <div class="active-stat">
+              <span class="as-label">Entry Price</span>
+              <span class="as-value" id="ap-entry">0.00</span>
+            </div>
+            <div class="active-stat">
+              <span class="as-label">Mark Price</span>
+              <span class="as-value" id="ap-mark">0.00</span>
+            </div>
+            <div class="active-stat">
+              <span class="as-label">Stop Loss</span>
+              <span class="as-value red-text" id="ap-sl">0.00</span>
+            </div>
+            <div class="active-stat">
+              <span class="as-label">Take Profit</span>
+              <span class="as-value green-text" id="ap-tp">0.00</span>
+            </div>
+          </div>
+          <div class="active-footer" style="display:flex; justify-content:space-between; align-items:center;">
+             <div class="target-line" style="font-size: 13px; color: var(--muted); font-weight: 700;">UNREALIZED PROFIT</div>
+             <div style="text-align:right">
+               <div id="ap-pnl" style="font-size:28px; font-weight:800; font-family:'JetBrains Mono',monospace;">$0.00</div>
+               <div id="ap-pnl-pct" style="font-size:14px; font-weight:700;">+0.00%</div>
+             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trade Log Preview -->
+      <div class="trade-log">
+        <div class="trade-log-header">
+          <h3>📋 Recent Trades</h3>
+          <button class="clear-btn" id="mini-clear-log-btn">Clear Log</button>
+        </div>
+        <div class="log-list" id="log-list">
+          <div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">
+            No trades yet. Start the bot to begin trading.
+          </div>
+        </div>
+      </div>
+    </div> <!-- END PAGE: OVERVIEW -->
+
+    <!-- ══ PAGE: LITE (JADOO / MAGIC MODE) ══ -->
+    <div class="page" id="page-lite">
+      <!-- Animated Magic Background -->
+      <div class="magic-bg">
+        <div class="magic-blob blob-1"></div>
+        <div class="magic-blob blob-2"></div>
+        <div class="magic-blob blob-3"></div>
+      </div>
+
+      <div class="lite-container magic-container">
+        
+        <!-- Floating Expert Toggle -->
+        <button class="lite-return-btn" id="lite-return-btn">⚙️ EXPERT MODE</button>
+
+        <!-- PNL Header (Hologram Style) -->
+        <div class="lite-profit-header holo-text">
+          <p>LIVE AI PROFIT</p>
+          <h1 id="lite-pnl" class="glitch-text">$0.00</h1>
+          <span class="lite-badge magic-badge" id="lite-pnl-pct">+0.00%</span>
+        </div>
+
+        <!-- The Magic Reactor Core (Engine) -->
+        <div class="lite-engine-card magic-reactor">
+          <div class="reactor-ring ring-1"></div>
+          <div class="reactor-ring ring-2"></div>
+          <div class="engine-glow"></div>
+          
+          <h2 class="magic-title">✨ AI AUTOPILOT CORE</h2>
+          <p class="engine-desc">One click. Zero effort. Maximum magic.</p>
+
+          <div class="engine-inputs magic-inputs">
+             <div class="lite-input-group">
+                <label>Select Asset</label>
+                <select id="lite-symbol" class="lite-select magic-select">
+                  <option>BTCUSDT</option>
+                  <option>ETHUSDT</option>
+                  <option>SOLUSDT</option>
+                </select>
+             </div>
+             <div class="lite-input-group">
+                <label>Investment ($)</label>
+                <input type="number" id="lite-amount" class="lite-select magic-select" value="100">
+             </div>
+          </div>
+
+          <div class="btn-wrapper">
+             <div class="sonar-wave"></div>
+             <div class="sonar-wave delay-1"></div>
+             <button id="lite-toggle-btn" class="btn-massive-start magic-btn">
+               <span class="btn-text">🚀 AWAKEN AI ENGINE</span>
+             </button>
+          </div>
+          
+          <div class="shield-status magic-shield">
+            🛡️ <b>God Mode Active:</b> Capital perfectly protected by AI
+          </div>
+        </div>
+
+        <!-- Active Position (Jadoo Simplified) -->
+        <div id="lite-active-pos" style="display:none; margin-top:30px">
+          <div class="lite-active-card magic-live-card">
+             <div class="magic-scanning-line"></div>
+             <div class="lite-pos-left">
+               <div class="lite-pulse-dot magic-dot"></div>
+               <div>
+                  <strong id="lap-symbol" style="letter-spacing:1px">BTCUSDT</strong>
+                  <span id="lap-dir" class="lite-pos-badge magic-dir long">LONG</span>
+               </div>
+             </div>
+             <div class="lite-pos-right">
+               <div class="lite-pos-pnl magic-pnl" id="lap-pnl">+$0.00</div>
+               <button id="lite-close-btn" class="lite-close-btn magic-close">✖ CLOSE</button>
+             </div>
+          </div>
+        </div>
+
+      </div>
+    </div> <!-- END PAGE: LITE -->
+
+    <!-- ══ PAGE: BOT CONTROL ══ -->
+    <div class="page" id="page-bot">
+      <div class="bot-control-bar">
+        <div class="big-status">
+          <div id="big-dot" class="dot-lg off"></div>
+          <div>
+            <div class="status-big" id="big-status-text">BOT OFFLINE</div>
+            <div style="font-size:12px;color:var(--muted)" id="big-strategy-text">No strategy selected</div>
+          </div>
+        </div>
+        <button id="big-start-btn" class="btn-start-big">
+          ▶ START BOT ⚡
+        </button>
+      </div>
+
+      <!-- Strategy Selection -->
+      <div class="strategy-section">
+        <div class="section-title">📈 SELECT STRATEGY</div>
+        <div class="strategy-big-grid">
+          <div class="strategy-big-card sel-rsi" data-strat="RSI+EMA">
+            <div class="strat-em">📈</div>
+            <div class="strat-name">RSI + EMA</div>
+            <div class="strat-desc">Uses RSI(14) overbought/oversold with EMA(21) trend filter. Best for ranging markets.</div>
+            <div class="strat-badge badge-g">MOMENTUM</div>
+          </div>
+          <div class="strategy-big-card" data-strat="MACD">
+            <div class="strat-em">📊</div>
+            <div class="strat-name">MACD</div>
+            <div class="strat-desc">MACD (12,26,9) crossover signals. Best for trending markets with high volatility.</div>
+            <div class="strat-badge badge-c">TREND</div>
+          </div>
+          <div class="strategy-big-card" data-strat="Scalping">
+            <div class="strat-em">⚡</div>
+            <div class="strat-name">Scalping</div>
+            <div class="strat-desc">9/21 EMA crossover on 1m/3m charts. High frequency short-term trades.</div>
+            <div class="strat-badge badge-p">FAST</div>
+          </div>
+          <div class="strategy-big-card" data-strat="Deep AI">
+            <div class="strat-em">🧠</div>
+            <div class="strat-name">Deep AI</div>
+            <div class="strat-desc">Gemini AI analyzes 24h market structure + global news to make ultra-safe decisions.</div>
+            <div class="strat-badge badge-a" style="background:rgba(217, 70, 239, 0.15); color:#d946ef;">GOD MODE</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: TRADES ══ -->
+    <div class="page" id="page-trades">
+      <div class="log-full">
+        <div class="log-toolbar">
+          <button class="filter-btn active" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="LONG">LONG</button>
+          <button class="filter-btn" data-filter="SHORT">SHORT</button>
+          <button class="filter-btn" data-filter="win">Wins</button>
+          <button class="filter-btn" data-filter="loss">Losses</button>
+          <button class="clear-btn" id="full-clear-log-btn" style="margin-left:auto">Clear All</button>
+        </div>
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>TYPE</th>
+              <th>SYMBOL</th>
+              <th>ENTRY</th>
+              <th>EXIT</th>
+              <th>P&amp;L</th>
+              <th>STRATEGY</th>
+              <th>TIME</th>
+            </tr>
+          </thead>
+          <tbody id="full-log-body">
+            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">No trades yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: SETTINGS ══ -->
+    <div class="page" id="page-settings">
+      <div class="settings-grid">
+        <div class="settings-card">
+          <div class="settings-title"><span>🔑</span> Binance API Keys</div>
+          <div class="input-group">
+            <label class="input-label">API KEY</label>
+            <div class="input-wrap">
+              <input type="password" id="api-key" class="settings-input" placeholder="Enter your Binance API Key">
+              <button class="eye-btn" data-target="api-key">👁</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label class="input-label">SECRET KEY</label>
+            <div class="input-wrap">
+              <input type="password" id="api-secret" class="settings-input" placeholder="Enter your Binance Secret Key">
+              <button class="eye-btn" data-target="api-secret">👁</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label class="input-label">TESTNET MODE</label>
+            <select id="use-testnet" class="settings-input" style="font-family:'Inter',sans-serif">
+              <option value="true">✅ Yes — Use Testnet (Recommended)</option>
+              <option value="false">⚠️ No — Real Money</option>
+            </select>
+          </div>
+          
+          <div class="settings-title" style="margin-top:24px;"><span>🧠</span> Artificial Intelligence</div>
+          <div class="input-group">
+            <label class="input-label">GEMINI AI API KEY (For Deep AI Strategy)</label>
+            <div class="input-wrap">
+              <input type="password" id="gemini-key" class="settings-input" placeholder="Get free key at aistudio.google.com">
+              <button class="eye-btn" data-target="gemini-key">👁</button>
+            </div>
+          </div>
+          <button id="save-api-btn" class="save-btn">💾 SAVE API KEYS</button>
+          <div class="warning-box">
+            <strong>⚠️ SECURITY NOTICE</strong><br>
+            Keys are stored locally in Chrome Storage only.<br>
+            Never share your Secret Key. Use <strong>Futures-only</strong> API keys with <strong>no withdrawal</strong> permissions.
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-title"><span>🧪</span> Testnet Setup Guide</div>
+          <div style="font-size:13px;line-height:1.8;color:var(--muted)">
+            <p style="margin-bottom:12px;color:var(--text)">To use paper/testnet mode safely:</p>
+            <ol style="padding-left:16px;display:flex;flex-direction:column;gap:8px">
+              <li>Visit <strong style="color:var(--cyan)">testnet.binancefuture.com</strong></li>
+              <li>Login with GitHub or Google</li>
+              <li>Go to API Management → Create API Key</li>
+              <li>Copy and paste both keys here</li>
+              <li>Enable Testnet Mode above</li>
+              <li>You get <strong style="color:var(--green)">10,000 USDT</strong> test funds</li>
+            </ol>
+          </div>
+          <div class="info-box">
+            ✅ Testnet mode is <strong>100% safe</strong> — no real money at risk.<br>
+            Perfect for testing strategies before going live.
+          </div>
+
+          <div class="settings-title" style="margin-top:24px"><span>🛡️</span> Security PIN Lock</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+            Set a 4-digit PIN to lock the dashboard when opened.
+          </div>
+          <div style="display:flex;gap:10px;margin-bottom:12px">
+            <input type="password" id="new-pin" maxlength="4" placeholder="••••" style="width:100px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);text-align:center">
+            <button id="save-pin-btn" class="save-btn" style="padding:8px 16px;font-size:11px">UPDATE PIN</button>
+          </div>
+
+          <div class="settings-title" style="margin-top:24px"><span>📊</span> Connection Status</div>
+          <div id="conn-status" style="font-size:13px;color:var(--muted);margin-top:8px">
+            Not tested yet.
+          </div>
+          <button id="test-conn-btn" class="save-btn" style="margin-top:12px;background:linear-gradient(135deg,var(--cyan),var(--blue))">
+            🔗 TEST CONNECTION
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end main -->
+</div><!-- end layout -->
+
+<!-- TOAST -->
+<div id="toast" class="toast">✅ Saved!</div>
+
+<script src="dashboard.js"></script>
+</body>
+</html>

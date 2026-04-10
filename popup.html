@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Futures Bot</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+
+    <!-- HEADER -->
+    <div class="header">
+      <div class="logo-wrap">
+        <img src="icon.png" style="width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,255,255,0.1)" alt="logo">
+        <div>
+          <h1 class="brand-name">FUTURES AI</h1>
+          <p class="brand-sub">PRO TRADER EDITION</p>
+        </div>
+      </div>
+      <div class="premium-badge" id="premium-badge-btn">⭐ PREMIUM</div>
+    </div>
+
+    <!-- BALANCE CARD -->
+    <div class="card balance-card">
+      <div class="balance-header">
+        <span class="label">Total Balance</span>
+      </div>
+      <div id="balance" class="balance-amount">0.00 USDT</div>
+      <div class="balance-bar-wrap">
+        <div class="balance-bar" id="balance-bar" style="width:5%"></div>
+      </div>
+      <div class="balance-footer">
+        <div>Today's P&amp;L: <span id="today-pl" class="profit">+$0.00</span></div>
+        <div>Active Trades: <span id="active-trades" class="cyan-text">0</span></div>
+      </div>
+    </div>
+
+    <!-- BOT STATUS -->
+    <div class="card status-card">
+      <div class="status-left">
+        <div id="status-dot" class="dot dot-off"></div>
+        <span id="bot-status" class="status-label">BOT OFF</span>
+      </div>
+      <button id="start-btn" class="start-btn">
+        <span id="btn-text">START BOT</span>
+        <span>⚡</span>
+      </button>
+    </div>
+
+    <!-- LIVE STATS ROW -->
+    <div class="stats-row">
+      <div class="stat-box">
+        <span class="stat-label">Win Rate</span>
+        <span id="win-rate" class="stat-value green">—</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Total Trades</span>
+        <span id="total-trades" class="stat-value cyan">—</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Leverage</span>
+        <span id="leverage-display" class="stat-value amber">5x</span>
+      </div>
+    </div>
+
+    <!-- STRATEGY SELECTOR -->
+    <div class="strategy-grid">
+      <div class="strategy-card active-strategy" data-strategy="RSI+EMA">
+        <div class="strategy-icon green-text">📈</div>
+        <div class="strategy-name">RSI + EMA</div>
+        <p class="strategy-desc">Classic momentum</p>
+      </div>
+      <div class="strategy-card" data-strategy="MACD">
+        <div class="strategy-icon cyan-text">📊</div>
+        <div class="strategy-name">MACD</div>
+        <p class="strategy-desc">Trend reversal king</p>
+      </div>
+      <div class="strategy-card" data-strategy="Scalping">
+        <div class="strategy-icon purple-text">⚡</div>
+        <div class="strategy-name">Scalping</div>
+        <p class="strategy-desc">9/21 EMA lightning</p>
+      </div>
+      <div class="strategy-card" data-strategy="Deep AI">
+        <div class="strategy-icon" style="color:#d946ef">🧠</div>
+        <div class="strategy-name">Deep AI</div>
+        <p class="strategy-desc">Gemini AI + News logic</p>
+      </div>
+    </div>
+
+    <!-- API KEY STATUS -->
+    <div id="api-status-bar" class="api-status-bar no-api">
+      ⚠️ API Keys not configured — <span id="api-setup-link" class="link-text">Click to Setup</span>
+    </div>
+
+    <!-- FULL DASHBOARD BUTTON -->
+    <button id="full-dashboard-btn" class="dashboard-btn">
+      🌐 OPEN FULL-SCREEN DASHBOARD
+      <span class="dash-icon">📊</span>
+    </button>
+
+    <div class="footer-text">100% Secure • No withdrawal keys • Paper mode available</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

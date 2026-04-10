@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "🚀 AI Crypto Futures Bot – Pro Trader",
+  "version": "1.0.0",
+  "description": "World's most beautiful automated Binance Futures bot with RSI, MACD, Scalping & Breakout strategies",
+  "permissions": ["storage", "alarms", "notifications", "tabs"],
+  "host_permissions": [
+    "https://api.binance.com/*",
+    "https://fapi.binance.com/*",
+    "https://testnet.binancefuture.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "32": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "options_page": "dashboard.html",
+  "icons": {
+    "16": "icon.png",
+    "32": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}
