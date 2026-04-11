@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FUTURES AI — LICENSE GENERATOR</title>
+    <style>
+        body { font-family: sans-serif; background: #020817; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background: #0f172a; padding: 40px; border-radius: 20px; border: 1px solid #1e293b; width: 450px; text-align: center; }
+        h1 { font-size: 20px; margin-bottom: 20px; color: #22d3ee; }
+        input { width: 100%; padding: 12px; margin-bottom: 20px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; color: #fff; text-align: center; font-family: monospace; }
+        button { width: 100%; padding: 12px; background: #10b981; border: none; border-radius: 8px; color: #000; font-weight: bold; cursor: pointer; }
+        .result { margin-top: 30px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px dashed #22d3ee; display: none; }
+        label { display: block; text-align: left; font-size: 11px; color: #94a3b8; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>💎 FUTURES AI: KEY GEN</h1>
+        
+        <label>ENTER TRADER'S DEVICE ID</label>
+        <input type="text" id="dev-id" placeholder="PASTE DEVICE ID HERE">
+        
+        <button onclick="generateKey()">🚀 GENERATE $10 LICENSE</button>
+
+        <div class="result" id="result-box">
+            <label>LICENSE KEY (COPY THIS)</label>
+            <input type="text" id="final-key" readonly>
+            <p style="font-size: 10px; color: #10b981;">Key bound to this Device ID for 30 days.</p>
+        </div>
+    </div>
+
+    <script>
+        const APP_SECRET = 'FUTURES-AI-V1-SECURE-TOKEN';
+
+        async function generateKey() {
+            const devId = document.getElementById('dev-id').value.trim().toUpperCase();
+            if (!devId) return alert('Enter Device ID first');
+
+            const hash = await generateHash(devId);
+            const finalKey = `FUTURES-AI-PRO-${hash}`;
+            
+            document.getElementById('final-key').value = finalKey;
+            document.getElementById('result-box').style.display = 'block';
+        }
+
+        async function generateHash(devId) {
+            const msgUint8 = new TextEncoder().encode(devId + APP_SECRET);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase().substring(0, 12);
+        }
+    </script>
+</body>
+</html>

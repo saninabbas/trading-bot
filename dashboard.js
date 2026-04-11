@@ -43,6 +43,7 @@ function initDashListeners() {
     if (e.target.id === 'close-pos-btn')  { forceClosePosition(); return; }
     if (e.target.id === 'activate-btn')   { activateLicense(); return; }
     if (e.target.id === 'copy-addr-btn')  { copyToClipboard('sub-address', 'Address copied!'); return; }
+    if (e.target.id === 'copy-device-btn') { copyToClipboard('device-id-field', 'ID Copied! Send this to support.'); return; }
 
     // 4. Filters & Logs
     const filterBtn = e.target.closest('.filter-btn');
@@ -686,10 +687,14 @@ function initSubscriptionUI(data) {
   const licenseKey = data.licenseKey || '';
   const installTime = data.installTime || Date.now();
   const activationDate = data.activationDate || null;
+  const deviceId = data.deviceId || '---';
   
-  // Set license key input value
+  // Set IDs
   const licInput = document.getElementById('license-key-input');
   if (licInput) licInput.value = licenseKey;
+  
+  const devEl = document.getElementById('device-id-field');
+  if (devEl) devEl.value = deviceId;
 
   updateSubscriptionStatus(licenseKey, installTime, activationDate);
   
@@ -803,7 +808,10 @@ async function activateLicense() {
   const key = document.getElementById('license-key-input').value.trim();
   if (!key) return showToast('Please enter a license key', true);
 
-  if (isValidLicense(key)) {
+  // Ask background to validate (as it has the SHA-256 logic)
+  const response = await chrome.runtime.sendMessage({ action: 'VALIDATE_KEY', key: key });
+  
+  if (response && response.valid) {
     // Save new key AND reset activation date to "Now" to start a new 30-day period
     await chrome.storage.local.set({ 
       licenseKey: key, 
@@ -812,11 +820,12 @@ async function activateLicense() {
     showToast('🚀 License Activated! 30 days of access granted.');
     location.reload(); 
   } else {
-    showToast('❌ Invalid License Key. Check your entry or contact support.', true);
+    showToast('❌ Invalid License Key for this device. Contact support.', true);
   }
 }
 
 function isValidLicense(key) {
+  // Simple check for UI, real check is in background
   if (!key) return false;
   return key.trim().toUpperCase().startsWith('FUTURES-AI-PRO-');
 }

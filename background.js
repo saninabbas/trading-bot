@@ -41,8 +41,10 @@ const TEST_BASE    = 'https://testnet.binancefuture.com';
 const BASE_URL     = () => USE_TESTNET ? TEST_BASE : LIVE_BASE;
 
 let INSTALL_TIME   = 0;
+let DEVICE_ID      = '';
 const TRIAL_DURATION = 3600000; // 1 Hour in ms
 const LICENSE_DURATION = 2592000000; // 30 Days in ms
+const APP_SECRET     = 'FUTURES-AI-V1-SECURE-TOKEN'; // Secret used for Hashing
 
 // Heartbeat to prevent suspension (Visual only for dashboard)
 setInterval(() => {
@@ -69,8 +71,13 @@ setInterval(() => {
     if (!data.installTime) {
       INSTALL_TIME = Date.now();
       await chrome.storage.local.set({ installTime: INSTALL_TIME });
+    // Device ID Logic
+    if (!data.deviceId) {
+      DEVICE_ID = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+                     .map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+      await chrome.storage.local.set({ deviceId: DEVICE_ID });
     } else {
-      INSTALL_TIME = data.installTime;
+      DEVICE_ID = data.deviceId;
     }
 
     await syncWithBinanceTime();
@@ -104,6 +111,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       switch (msg.action) {
+        case 'VALIDATE_KEY':
+          const isValid = await validateLicenseKey(msg.key);
+          sendResponse({ valid: isValid });
+          return true;
         case 'START_BOT':
           STRATEGY = msg.strategy || 'RSI+EMA';
           TRADE_SETTINGS = msg.settings || {};
@@ -189,11 +200,10 @@ async function loadKeys() {
   API_KEY      = (data.apiKey || '').trim();
   API_SECRET   = (data.apiSecret || '').trim();
   USE_TESTNET  = data.useTestnet !== false;
-  ACTIVE_TRADE = data.activeTrade || null;
-  GEMINI_KEY   = (data.geminiKey || '').trim();
-  LICENSE_KEY  = (data.licenseKey || '').trim();
-  LICENSE_VALID = validateLicenseKey(LICENSE_KEY);
-  INSTALL_TIME = data.installTime || Date.now();
+  LICENSE_KEY   = (data.licenseKey || '').trim();
+  LICENSE_VALID = await validateLicenseKey(LICENSE_KEY);
+  INSTALL_TIME  = data.installTime || Date.now();
+  DEVICE_ID     = data.deviceId || 'UNKNOWN';
 }
 
 /* ── Start Bot ──────────────────────────────────────────── */
@@ -1243,10 +1253,26 @@ function isSubscriptionActive() {
 }
 
 /* ── License Key Logic ──────────────────────────────────── */
-function validateLicenseKey(key) {
+async function validateLicenseKey(key) {
   if (!key) return false;
-  // Professional Secret Pattern: FUTURES-AI-PRO-XXXX
-  return key.trim().toUpperCase().startsWith('FUTURES-AI-PRO-');
+  const k = key.trim().toUpperCase();
+  if (!k.startsWith('FUTURES-AI-PRO-')) return false;
+  
+  // Extract hash from key: FUTURES-AI-PRO-[HASH]
+  const providedHash = k.replace('FUTURES-AI-PRO-', '');
+  
+  // Generate expected hash for THIS device
+  const expectedHash = await generateHardwareHash(DEVICE_ID);
+  
+  // A key is valid if it contains the hardware hash
+  return providedHash.includes(expectedHash);
+}
+
+async function generateHardwareHash(devId) {
+  const msgUint8 = new TextEncoder().encode(devId + APP_SECRET);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase().substring(0, 12);
 }
 
 /** 
