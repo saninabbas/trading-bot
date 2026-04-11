@@ -1,7 +1,9 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════
-   FUTURES AI – background.js  v2.0 (Clean Engine)
+   FUTURES AI – background.js  v2.1
    4 Strategies: RSI+EMA | MACD | Scalping (EMA9/21) | Breakout
+   + Gemini AI Signal Filter (confirmation before every trade)
+   + Gemini AI Chatbot (market analysis + manual trade commands)
    Risk: Max 2% per trade | SL/TP | Daily loss limit
    Modes: Paper (default) | Live Binance Futures
 ═══════════════════════════════════════════════════════════════ */
@@ -24,6 +26,7 @@ let LICENSE_VALID    = false;
 let DAILY_PNL        = 0;
 let DAILY_RESET_DATE = '';
 let LAST_LOSS_TIME   = 0;
+let GEMINI_KEY       = '';
 
 const LIVE_BASE          = 'https://fapi.binance.com';
 const TEST_BASE          = 'https://testnet.binancefuture.com';
@@ -39,8 +42,9 @@ const COOLDOWN_MS        = 15 * 60000;   // 15 min cooldown after loss
   const d = await chrome.storage.local.get([
     'botRunning', 'selectedStrategy', 'savedSettings',
     'apiKey', 'apiSecret', 'useTestnet', 'activeTrade',
-    'installTime', 'deviceId', 'licenseKey', 'dailyPnl', 'dailyResetDate'
+    'installTime', 'deviceId', 'licenseKey', 'dailyPnl', 'dailyResetDate', 'geminiKey'
   ]);
+  GEMINI_KEY = (d.geminiKey || '').trim();
 
   // Install time
   if (!d.installTime) {
@@ -171,6 +175,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
 
+        case 'CHAT_QUERY': {
+          // Async — run and return true immediately
+          handleChatQuery(msg.query).then(reply => {
+            sendResponse({ reply });
+          }).catch(e => {
+            sendResponse({ reply: '❌ Error: ' + e.message });
+          });
+          return true;
+        }
+
         default:
           sendResponse({ ok: false, error: 'Unknown action' });
       }
@@ -211,8 +225,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   try {
     // Reload keys fresh each tick
     const d = await chrome.storage.local.get([
-      'apiKey','apiSecret','useTestnet','savedSettings','selectedStrategy','activeTrade','dailyPnl','dailyResetDate'
+      'apiKey','apiSecret','useTestnet','savedSettings','selectedStrategy','activeTrade','dailyPnl','dailyResetDate','geminiKey'
     ]);
+    GEMINI_KEY = (d.geminiKey || '').trim();
     API_KEY        = (d.apiKey || '').trim();
     API_SECRET     = (d.apiSecret || '').trim();
     USE_TESTNET    = d.useTestnet !== false;
@@ -298,6 +313,21 @@ async function runStrategy() {
     if (direction) {
       log(`✅ Signal: ${direction} on ${symbol} @ $${price.toFixed(2)}`);
       broadcastLog(`✅ Signal: ${direction} | ${symbol} @ $${price.toFixed(2)}`);
+
+      // ── Gemini AI Signal Filter ───────────────────────────
+      if (GEMINI_KEY) {
+        broadcastLog(`🤖 Asking Gemini AI to confirm signal...`);
+        const rsi = (() => { const r = calcRSI(closes, 14); return r ? r[r.length-1].toFixed(2) : 'N/A'; })();
+        const ema50 = (() => { const e = calcEMA(closes, 50); return e ? e[e.length-1].toFixed(2) : 'N/A'; })();
+        const confirmed = await geminiConfirmSignal(symbol, direction, price, rsi, ema50, STRATEGY);
+        if (!confirmed) {
+          broadcastLog(`🤖 Gemini: Signal SKIPPED (low confidence)`);
+          return;
+        }
+        broadcastLog(`🤖 Gemini: Signal CONFIRMED ✅`);
+      }
+      // ─────────────────────────────────────────────────────
+
       await openTrade(symbol, direction, price);
     } else {
       broadcastLog(`⏳ No signal yet (${STRATEGY})`);
@@ -766,4 +796,134 @@ function notify(title, message) {
 function log(msg, detail = '') {
   console.log(`[FUTURES-AI] ${msg}`, detail);
   broadcastLog(`${msg} ${detail}`);
+}
+
+/* ══════════════════════════════════════════════════════════
+   GEMINI AI — Signal Filter + Chatbot
+══════════════════════════════════════════════════════════ */
+
+/* ── Gemini Signal Confirmation (called before every trade) ─ */
+async function geminiConfirmSignal(symbol, direction, price, rsi, ema50, strategy) {
+  if (!GEMINI_KEY) return true; // If no key, skip filter and trade anyway
+
+  const prompt = `You are a professional crypto futures analyst.
+A trading bot generated a ${direction} signal on ${symbol} using the ${strategy} strategy.
+
+Current data:
+- Price: $${price.toFixed(2)}
+- RSI(14): ${rsi}
+- EMA(50): $${ema50}
+- Signal Direction: ${direction}
+
+Should this trade be executed? Consider momentum, RSI levels, and whether the signal makes technical sense.
+
+Respond with ONLY a valid JSON object. No explanation, no extra text:
+{"action": "CONFIRM"} or {"action": "SKIP", "reason": "one sentence"}`;
+
+  try {
+    const res = await fetchWT(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 80 }
+        })
+      }, 12000
+    );
+    const data = await res.json();
+    if (data.error) { log('Gemini filter error', data.error.message); return true; }
+
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // Extract JSON even if wrapped in markdown
+    const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
+    if (!jsonMatch) return true; // Can't parse → allow trade
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (parsed.action === 'SKIP') {
+      log('🤖 Gemini skip reason:', parsed.reason || 'low confidence');
+      return false;
+    }
+    return true; // CONFIRM
+  } catch (e) {
+    log('Gemini filter exception', e.message);
+    return true; // On error, allow trade (fail-safe)
+  }
+}
+
+/* ── Gemini AI Chatbot ────────────────────────────────────── */
+async function handleChatQuery(query) {
+  if (!GEMINI_KEY) return '⚠️ Please save your Gemini API Key in Settings → API Keys tab first.';
+
+  // Gather live context
+  let context = 'Market context unavailable.';
+  try {
+    const symbol  = (TRADE_SETTINGS.symbol || 'BTCUSDT').toUpperCase();
+    const price   = await getTickerPrice(symbol);
+    const candles = await getCandles(symbol, '15m', 50);
+    const closes  = candles.map(c => parseFloat(c[4]));
+    const rsiArr  = calcRSI(closes, 14);
+    const rsi     = rsiArr ? rsiArr[rsiArr.length - 1].toFixed(2) : 'N/A';
+    const ema50Arr = calcEMA(closes, 50);
+    const ema50   = ema50Arr ? ema50Arr[ema50Arr.length - 1].toFixed(2) : 'N/A';
+
+    const trade = ACTIVE_TRADE
+      ? `Active Trade: ${ACTIVE_TRADE.direction} ${ACTIVE_TRADE.symbol} @ $${ACTIVE_TRADE.entry} | P&L: ${ACTIVE_TRADE.pnl?.toFixed(4) || '0'} USDT`
+      : 'No active trade.';
+
+    context = `Symbol: ${symbol} | Price: $${price.toFixed(2)} | RSI(14): ${rsi} | EMA50: $${ema50} | Strategy: ${STRATEGY} | ${trade}`;
+  } catch (e) {
+    log('Chat context error', e.message);
+  }
+
+  const prompt = `You are FUTURES AI Oracle — a sharp, professional crypto trading assistant embedded in a Binance Futures bot. Be concise and helpful. Use short responses.
+
+LIVE MARKET CONTEXT:
+${context}
+
+RULES:
+- If the user asks to LONG/SHORT a coin, reply with: <EXECUTE>{"action":"LONG","symbol":"BTCUSDT"}</EXECUTE> followed by a confirmation message.
+- For any other question, give a professional answer based on the context.
+- Keep responses under 150 words.
+
+USER: "${query}"`;
+
+  try {
+    const res = await fetchWT(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 300 }
+        })
+      }, 15000
+    );
+    const data = await res.json();
+    if (data.error) return '❌ API Error: ' + data.error.message;
+
+    let reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from Oracle.';
+
+    // Check for trade execution tag
+    const execMatch = reply.match(/<EXECUTE>([\s\S]*?)<\/EXECUTE>/);
+    if (execMatch) {
+      try {
+        const cmd = JSON.parse(execMatch[1]);
+        if (cmd.action && cmd.symbol) {
+          reply = reply.replace(execMatch[0], '').trim();
+          setTimeout(async () => {
+            const p = await getTickerPrice(cmd.symbol);
+            broadcastLog(`🤖 AI Oracle executing ${cmd.action} on ${cmd.symbol}...`);
+            await openTrade(cmd.symbol, cmd.action, p);
+          }, 300);
+        }
+      } catch (e) { log('Chat trade parse error', e.message); }
+    }
+
+    return reply;
+  } catch (e) {
+    return '⚠️ Oracle offline. Please check your Gemini API Key.';
+  }
 }

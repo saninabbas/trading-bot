@@ -47,6 +47,16 @@ function initListeners() {
   document.getElementById('activate-btn').addEventListener('click', activateLicense);
   document.getElementById('copy-device-btn').addEventListener('click', copyDeviceId);
   document.getElementById('clear-history-btn').addEventListener('click', clearHistory);
+
+  // Chat
+  document.getElementById('chat-toggle-btn').addEventListener('click', toggleChat);
+  document.getElementById('chat-close-btn').addEventListener('click', () => {
+    document.getElementById('chat-panel').classList.add('hidden');
+  });
+  document.getElementById('chat-send-btn').addEventListener('click', handleChatSend);
+  document.getElementById('chat-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleChatSend();
+  });
 }
 
 /* ── System Health ───────────────────────────────── */
@@ -200,9 +210,10 @@ function appendLog(text) {
 
 /* ── Settings ────────────────────────────────────── */
 async function loadSettings() {
-  const d = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet', 'savedSettings']);
-  if (d.apiKey)    document.getElementById('s-api-key').value    = d.apiKey;
-  if (d.apiSecret) document.getElementById('s-api-secret').value = d.apiSecret;
+  const d = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet', 'savedSettings', 'geminiKey']);
+  if (d.apiKey)     document.getElementById('s-api-key').value    = d.apiKey;
+  if (d.apiSecret)  document.getElementById('s-api-secret').value = d.apiSecret;
+  if (d.geminiKey)  document.getElementById('s-gemini-key').value  = d.geminiKey;
   document.getElementById('s-testnet').value = d.useTestnet === false ? 'false' : 'true';
 
   const s = d.savedSettings || {};
@@ -218,15 +229,16 @@ async function loadSettings() {
 async function saveApiKeys() {
   const apiKey    = document.getElementById('s-api-key').value.trim();
   const apiSecret = document.getElementById('s-api-secret').value.trim();
+  const geminiKey = document.getElementById('s-gemini-key').value.trim();
   const useTestnet = document.getElementById('s-testnet').value !== 'false';
 
   if (!apiKey || !apiSecret) {
-    showResult('api', '❌ Both fields are required.', 'err'); return;
+    showResult('api', '❌ Both Binance API fields are required.', 'err'); return;
   }
 
-  await chrome.storage.local.set({ apiKey, apiSecret, useTestnet });
+  await chrome.storage.local.set({ apiKey, apiSecret, useTestnet, geminiKey });
   await sendMsg({ action: 'UPDATE_KEYS', apiKey, apiSecret, useTestnet });
-  showResult('api', '✅ API Keys saved!', 'ok');
+  showResult('api', '✅ API Keys saved!' + (geminiKey ? ' Gemini AI enabled ✅' : ' (No Gemini key — AI features disabled)'), 'ok');
 }
 
 async function testConnection() {
@@ -359,4 +371,57 @@ function sendMsg(msg) {
     try { chrome.runtime.sendMessage(msg, resolve); }
     catch (e) { resolve(null); }
   });
+}
+
+/* ════════════════════════════════════════════════════════
+   AI ORACLE CHATBOT
+════════════════════════════════════════════════════════ */
+function toggleChat() {
+  document.getElementById('chat-panel').classList.toggle('hidden');
+}
+
+async function handleChatSend() {
+  const inputEl = document.getElementById('chat-input');
+  const text    = inputEl.value.trim();
+  if (!text) return;
+
+  inputEl.value = '';
+  appendChatMsg(text, 'user');
+
+  const typingEl = appendTyping();
+  const sendBtn  = document.getElementById('chat-send-btn');
+  sendBtn.disabled = true;
+
+  try {
+    const resp = await sendMsg({ action: 'CHAT_QUERY', query: text });
+    typingEl.remove();
+    appendChatMsg(resp?.reply || "I'm having trouble connecting. Please try again.", 'bot');
+  } catch (e) {
+    typingEl.remove();
+    appendChatMsg('⚠️ Network error. Cannot reach Oracle.', 'bot');
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+function appendChatMsg(text, sender) {
+  const box = document.getElementById('chat-messages');
+  const wrap = document.createElement('div');
+  wrap.className = `chat-msg ${sender}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+}
+
+function appendTyping() {
+  const box = document.getElementById('chat-messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-msg bot';
+  wrap.innerHTML = '<div class="msg-typing"><span></span><span></span><span></span></div>';
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+  return wrap;
 }

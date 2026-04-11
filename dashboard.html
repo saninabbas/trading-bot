@@ -100,6 +100,10 @@
           <input type="password" id="s-api-secret" placeholder="Your Binance Futures Secret">
         </div>
         <div class="form-row">
+          <label>Gemini AI API Key <span style="color:var(--cyan);font-size:10px">(Required for AI Signal Filter + Chatbot)</span></label>
+          <input type="password" id="s-gemini-key" placeholder="AIzaSy...">
+        </div>
+        <div class="form-row">
           <label>Mode</label>
           <select id="s-mode">
             <option value="paper">📄 Paper Trading (Safe – No Real Money)</option>
@@ -213,5 +217,30 @@
   </main>
 
   <script src="dashboard.js"></script>
+
+  <!-- ══ AI ORACLE CHATBOT ══ -->
+  <button id="chat-toggle-btn" class="chat-fab" title="AI Oracle - Ask me anything!">
+    🤖 <span>Oracle</span>
+  </button>
+
+  <div id="chat-panel" class="chat-panel hidden">
+    <div class="chat-header">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="chat-online-dot"></div>
+        <span>FUTURES AI ORACLE</span>
+      </div>
+      <button id="chat-close-btn" class="chat-close">×</button>
+    </div>
+    <div id="chat-messages" class="chat-messages">
+      <div class="chat-msg bot">
+        <div class="msg-bubble">👋 Hello Trader! I am the AI Market Oracle. Ask me about the market, news, or say <strong>"Long BTC"</strong> to open a trade!</div>
+      </div>
+    </div>
+    <div class="chat-input-row">
+      <input id="chat-input" class="chat-input" type="text" placeholder="Ask about BTC, say 'Long ETH'...">
+      <button id="chat-send-btn" class="chat-send">▶</button>
+    </div>
+  </div>
+
 </body>
 </html>
