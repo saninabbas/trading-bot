@@ -433,3 +433,55 @@ input[type=range]::-webkit-slider-thumb {
   .active-body { grid-template-columns: 1fr 1fr; gap: 10px; }
   .log-full { overflow-x: auto; }
 }
+/* ── SUBSCRIPTION PAGE STYLES ── */
+.subscription-container { max-width: 900px; margin: 0 auto; padding-bottom: 50px; }
+.sub-header { text-align: center; margin-bottom: 40px; }
+.sub-icon { font-size: 50px; margin-bottom: 15px; text-shadow: 0 0 20px rgba(34, 211, 238, 0.4); }
+.sub-header h2 { font-size: 32px; font-weight: 900; letter-spacing: -1px; margin-bottom: 10px; }
+.sub-header p { color: var(--muted); font-size: 15px; }
+
+.sub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 40px; }
+.sub-card { 
+  background: var(--card); border: 1px solid var(--border); border-radius: 20px; 
+  padding: 30px; position: relative; transition: all 0.3s;
+  backdrop-filter: var(--glass);
+}
+.sub-card:hover { transform: translateY(-5px); border-color: rgba(255,255,255,0.1); }
+.card-tag { 
+  display: inline-block; padding: 4px 12px; border-radius: 6px; 
+  font-size: 10px; font-weight: 800; background: rgba(34,211,238,0.1); 
+  color: var(--cyan); margin-bottom: 15px; letter-spacing: 1px;
+}
+.sub-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+
+.address-box { 
+  background: rgba(0,0,0,0.3); border: 1px solid var(--border); 
+  border-radius: 12px; padding: 16px; margin-bottom: 20px;
+}
+.address-box label { font-size: 9px; font-weight: 800; color: var(--muted); display: block; margin-bottom: 8px; }
+.copy-wrap { display: flex; gap: 10px; }
+.copy-wrap input { 
+  flex: 1; background: none; border: none; color: var(--text); 
+  font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none;
+}
+#copy-addr-btn { 
+  background: var(--cyan); color: #000; border: none; padding: 4px 12px; 
+  border-radius: 6px; font-size: 10px; font-weight: 800; cursor: pointer; transition: 0.2s;
+}
+#copy-addr-btn:hover { transform: scale(1.05); box-shadow: 0 0 10px var(--cyan); }
+
+.sub-price { margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border); }
+.price-val { font-size: 36px; font-weight: 900; color: var(--green); }
+.price-type { font-size: 14px; color: var(--muted); font-weight: 600; }
+
+.sub-footer { display: flex; justify-content: center; gap: 40px; }
+.footer-item { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+
+/* Sidebar Trial UI */
+#trial-badge { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+#trial-timer { font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }
+
+@media (max-width: 768px) {
+  .sub-grid { grid-template-columns: 1fr; }
+  .sub-header h2 { font-size: 24px; }
+}

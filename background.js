@@ -40,6 +40,9 @@ const LIVE_BASE    = 'https://fapi.binance.com';
 const TEST_BASE    = 'https://testnet.binancefuture.com';
 const BASE_URL     = () => USE_TESTNET ? TEST_BASE : LIVE_BASE;
 
+let INSTALL_TIME   = 0;
+const TRIAL_DURATION = 3600000; // 1 Hour in ms
+
 // Heartbeat to prevent suspension (Visual only for dashboard)
 setInterval(() => {
   if (BOT_RUNNING) {
@@ -61,6 +64,14 @@ setInterval(() => {
     GEMINI_KEY = data.geminiKey;
     ACTIVE_TRADE = data.activeTrade;
     
+    // Trial Logic
+    if (!data.installTime) {
+      INSTALL_TIME = Date.now();
+      await chrome.storage.local.set({ installTime: INSTALL_TIME });
+    } else {
+      INSTALL_TIME = data.installTime;
+    }
+
     await syncWithBinanceTime();
     // Ensure alarm is active
     chrome.alarms.create('bot-tick', { periodInMinutes: 0.5 }); 
@@ -86,6 +97,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       if (['START_BOT', 'FORCE_TRADE', 'TEST_CONNECTION', 'CLOSE_POSITION', 'FORCE_CLEAR_TRADE', 'MANUAL_TRADE'].includes(msg.action)) {
         await loadKeys();
+        if (msg.action === 'START_BOT' || msg.action === 'MANUAL_TRADE' || msg.action === 'FORCE_TRADE') {
+           if (!isSubscriptionActive()) throw new Error('Subscription Required. Your 1-hour trial has expired.');
+        }
       }
 
       switch (msg.action) {
@@ -177,7 +191,8 @@ async function loadKeys() {
   ACTIVE_TRADE = data.activeTrade || null;
   GEMINI_KEY   = (data.geminiKey || '').trim();
   LICENSE_KEY  = (data.licenseKey || '').trim();
-  if (data.licenseStatus) LICENSE_VALID = data.licenseStatus.valid;
+  LICENSE_VALID = validateLicenseKey(LICENSE_KEY);
+  INSTALL_TIME = data.installTime || Date.now();
 }
 
 /* ── Start Bot ──────────────────────────────────────────── */
@@ -218,6 +233,14 @@ function getIntervalMs() {
 /* ── Main Trading Cycle ─────────────────────────────────── */
 async function runCycle() {
   if (!BOT_RUNNING || IS_PROCESSING) return;
+  
+  // Hard subscription check in the loop
+  if (!isSubscriptionActive()) {
+    log('⚠️ Subscription Expired. Stopping bot.');
+    stopBot();
+    return;
+  }
+
   IS_PROCESSING = true;
   try {
     // FORCE RELOAD KEYS BEFORE EVERY CYCLE TO ENSURE NO 'MISSING' ERRORS
@@ -1195,6 +1218,19 @@ async function syncWithBinanceTime() {
     log('⚠️ Time Sync Failed:', e.message);
   }
 }
+function isSubscriptionActive() {
+  if (LICENSE_VALID) return true;
+  const trialLeft = TRIAL_DURATION - (Date.now() - INSTALL_TIME);
+  return trialLeft > 0;
+}
+
+/* ── License Key Logic ──────────────────────────────────── */
+function validateLicenseKey(key) {
+  if (!key) return false;
+  // Professional Secret Pattern: FUTURES-AI-PRO-XXXX
+  return key.trim().toUpperCase().startsWith('FUTURES-AI-PRO-');
+}
+
 async function getTicker24h(symbol) {
   try {
     const res = await fetchWithTimeout(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`, {}, 5000);

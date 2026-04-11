@@ -31,9 +31,18 @@
       <div class="nav-link" data-page="settings">
         <span class="nav-icon">⚙️</span> Settings
       </div>
+      <div class="nav-link" data-page="subscription">
+        <span class="nav-icon">💎</span> Subscription
+      </div>
     </nav>
     <div class="sidebar-spacer"></div>
       <div class="sidebar-bottom">
+        <!-- Trial Status -->
+        <div id="trial-badge" style="display:none; margin-bottom:12px; padding:10px; background:rgba(0,255,255,0.05); border:1px solid rgba(0,255,255,0.1); border-radius:8px">
+          <div style="font-size:10px; color:var(--muted); text-transform:uppercase">Free Trial</div>
+          <div id="trial-timer" style="font-size:14px; font-weight:700; color:var(--cyan)">60:00 left</div>
+        </div>
+
         <div class="bot-run-status">
            <div id="sb-dot" class="dot-sm off"></div>
            <div>
@@ -342,6 +351,61 @@
           <button id="test-conn-btn" class="save-btn" style="margin-top:12px;background:linear-gradient(135deg,var(--cyan),var(--blue))">
             🔗 TEST CONNECTION
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: SUBSCRIPTION ══ -->
+    <div class="page" id="page-subscription">
+      <div class="subscription-container">
+        <div class="sub-header">
+           <div class="sub-icon">💎</div>
+           <h2>FUTURES AI PREMIUM</h2>
+           <p>Unlock permanent access to the world&apos;s most advanced AI trading bot</p>
+        </div>
+
+        <div class="sub-grid">
+           <!-- Payment Card -->
+           <div class="sub-card payment-card">
+              <div class="card-tag">STEP 1: PAYMENT</div>
+              <h3>Direct USDT Transfer</h3>
+              <p style="font-size:13px; color:var(--muted); margin-bottom:20px">Send payment to the address below to activate your lifetime license.</p>
+              
+              <div class="address-box">
+                <label>USDT ADDRESS (BEP20 / BSC)</label>
+                <div class="copy-wrap">
+                  <input type="text" readonly value="0x9d35215728112c055c8d2472560d7e3ec58df135" id="sub-address">
+                  <button id="copy-addr-btn">COPY</button>
+                </div>
+              </div>
+
+              <div class="sub-price">
+                 <span class="price-val">$99</span>
+                 <span class="price-type">/ LIFETIME</span>
+              </div>
+           </div>
+
+           <!-- Activation Card -->
+           <div class="sub-card activation-card">
+              <div class="card-tag">STEP 2: ACTIVATION</div>
+              <h3>Enter License Key</h3>
+              <p style="font-size:13px; color:var(--muted); margin-bottom:20px">Once you have paid, contact support to receive your unique license key.</p>
+              
+              <div class="input-group">
+                <label class="input-label">LICENSE KEY</label>
+                <input type="text" id="license-key-input" class="settings-input" placeholder="FUTURES-AI-PRO-XXXX">
+              </div>
+              
+              <button id="activate-btn" class="save-btn" style="margin-top:12px">🚀 ACTIVATE PERMANENT ACCESS</button>
+
+              <div id="sub-status-msg" style="margin-top:15px; font-size:13px; font-weight:600; text-align:center"></div>
+           </div>
+        </div>
+
+        <div class="sub-footer">
+           <div class="footer-item">✅ 100% Secure</div>
+           <div class="footer-item">✅ 24/7 Support</div>
+           <div class="footer-item">✅ Lifetime Updates</div>
         </div>
       </div>
     </div>

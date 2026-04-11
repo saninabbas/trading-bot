@@ -41,6 +41,8 @@ function initDashListeners() {
     if (e.target.id === 'save-api-btn')   { saveApiKeys(); return; }
     if (e.target.id === 'test-conn-btn')  { testConnection(); return; }
     if (e.target.id === 'close-pos-btn')  { forceClosePosition(); return; }
+    if (e.target.id === 'activate-btn')   { activateLicense(); return; }
+    if (e.target.id === 'copy-addr-btn')  { copyToClipboard('sub-address', 'Address copied!'); return; }
 
     // 4. Filters & Logs
     const filterBtn = e.target.closest('.filter-btn');
@@ -79,7 +81,8 @@ function startClock() {
 async function loadAllData() {
   const data = await chrome.storage.local.get([
     'botRunning', 'selectedStrategy', 'stats',
-    'tradeLog', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'autoRisk'
+    'tradeLog', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'autoRisk',
+    'licenseKey', 'installTime'
   ]);
 
   if (data.botRunning) {
@@ -119,6 +122,9 @@ async function loadAllData() {
       }
     }
   }
+
+  // Subscription & Trial UI Init
+  initSubscriptionUI(data);
 }
 
 // ── Heartbeat Pulse: Drives Live Updates & Keeps Bot Awake ──
@@ -198,7 +204,8 @@ function showPage(name, navEl) {
   const titles = {
     overview: ['Overview', 'Live trading dashboard'],
     trades:   ['Trade Log', 'Full trading history'],
-    settings: ['Settings', 'Configure API keys & connection']
+    settings: ['Settings', 'Configure API keys & connection'],
+    subscription: ['Subscription', 'Manage your license & trial']
   };
 
   const titleEl = document.getElementById('page-title');
@@ -670,6 +677,110 @@ function updateActivePositionUI(pos) {
   
   pctEl.textContent = (pnl >= 0 ? '+' : '') + pos.pnlPct + '%';
   pctEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+}
+
+// ── Subscription Logic ────────────────────────────────────
+let trialTimerInterval = null;
+
+function initSubscriptionUI(data) {
+  const licenseKey = data.licenseKey || '';
+  const installTime = data.installTime || Date.now();
+  
+  // Set license key input value
+  const licInput = document.getElementById('license-key-input');
+  if (licInput) licInput.value = licenseKey;
+
+  updateSubscriptionStatus(licenseKey, installTime);
+  
+  // Start countdown if no license
+  if (!isValidLicense(licenseKey)) {
+    startTrialCountdown(installTime);
+  }
+}
+
+function updateSubscriptionStatus(key, installTime) {
+  const msgEl = document.getElementById('sub-status-msg');
+  const badge = document.getElementById('trial-badge');
+  const startBtn = document.getElementById('big-start-btn');
+
+  if (isValidLicense(key)) {
+    if (msgEl) {
+      msgEl.textContent = '✅ LICENSE ACTIVE — LIFETIME ACCESS UNLOCKED';
+      msgEl.style.color = 'var(--green)';
+    }
+    if (badge) badge.style.display = 'none';
+    if (startBtn) startBtn.disabled = false;
+    clearInterval(trialTimerInterval);
+  } else {
+    const trialLeft = 3600000 - (Date.now() - installTime);
+    if (trialLeft > 0) {
+      if (badge) badge.style.display = 'block';
+    } else {
+      if (msgEl) {
+        msgEl.textContent = '❌ TRIAL EXPIRED — SUBSCRIPTION REQUIRED';
+        msgEl.style.color = 'var(--red)';
+      }
+      if (badge) {
+        badge.style.background = 'rgba(244,63,94,0.1)';
+        badge.style.borderColor = 'var(--red)';
+        document.getElementById('trial-timer').style.color = 'var(--red)';
+        document.getElementById('trial-timer').textContent = 'EXPIRED';
+      }
+    }
+  }
+}
+
+function startTrialCountdown(installTime) {
+  const timerEl = document.getElementById('trial-timer');
+  const badge = document.getElementById('trial-badge');
+  
+  const tick = () => {
+    const now = Date.now();
+    const elapsed = now - installTime;
+    const timeLeft = 3600000 - elapsed;
+
+    if (timeLeft <= 0) {
+      timerEl.textContent = 'EXPIRED';
+      timerEl.style.color = 'var(--red)';
+      badge.style.background = 'rgba(244,63,94,0.1)';
+      clearInterval(trialTimerInterval);
+      updateSubscriptionStatus('', installTime);
+      return;
+    }
+
+    const mins = Math.floor(timeLeft / 60000);
+    const secs = Math.floor((timeLeft % 60000) / 1000);
+    timerEl.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs} left`;
+    badge.style.display = 'block';
+  };
+
+  tick();
+  trialTimerInterval = setInterval(tick, 1000);
+}
+
+async function activateLicense() {
+  const key = document.getElementById('license-key-input').value.trim();
+  if (!key) return showToast('Please enter a license key', true);
+
+  if (isValidLicense(key)) {
+    await chrome.storage.local.set({ licenseKey: key });
+    showToast('🚀 License Activated! Lifetime access granted.');
+    location.reload(); // Reload to refresh all status
+  } else {
+    showToast('❌ Invalid License Key. Check your entry or contact support.', true);
+  }
+}
+
+function isValidLicense(key) {
+  if (!key) return false;
+  return key.trim().toUpperCase().startsWith('FUTURES-AI-PRO-');
+}
+
+function copyToClipboard(id, msg) {
+  const el = document.getElementById(id);
+  el.select();
+  document.execCommand('copy');
+  showToast(msg);
 }
 
 // ── Fetch with Timeout ─────────────────────────────────────
