@@ -82,7 +82,7 @@ async function loadAllData() {
   const data = await chrome.storage.local.get([
     'botRunning', 'selectedStrategy', 'stats',
     'tradeLog', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'autoRisk',
-    'licenseKey', 'installTime'
+    'licenseKey', 'installTime', 'activationDate'
   ]);
 
   if (data.botRunning) {
@@ -685,34 +685,59 @@ let trialTimerInterval = null;
 function initSubscriptionUI(data) {
   const licenseKey = data.licenseKey || '';
   const installTime = data.installTime || Date.now();
+  const activationDate = data.activationDate || null;
   
   // Set license key input value
   const licInput = document.getElementById('license-key-input');
   if (licInput) licInput.value = licenseKey;
 
-  updateSubscriptionStatus(licenseKey, installTime);
+  updateSubscriptionStatus(licenseKey, installTime, activationDate);
   
-  // Start countdown if no license
-  if (!isValidLicense(licenseKey)) {
-    startTrialCountdown(installTime);
-  }
+  // Start countdown if no license or if license exists (to show days left)
+  startTrialCountdown(installTime, activationDate, licenseKey);
 }
 
-function updateSubscriptionStatus(key, installTime) {
+function updateSubscriptionStatus(key, installTime, activationDate) {
   const msgEl = document.getElementById('sub-status-msg');
   const badge = document.getElementById('trial-badge');
+  const timerEl = document.getElementById('trial-timer');
   const startBtn = document.getElementById('big-start-btn');
+  const now = Date.now();
 
-  if (isValidLicense(key)) {
-    if (msgEl) {
-      msgEl.textContent = '✅ LICENSE ACTIVE — LIFETIME ACCESS UNLOCKED';
-      msgEl.style.color = 'var(--green)';
+  if (isValidLicense(key) && activationDate) {
+    const elapsed = now - activationDate;
+    const timeLeft = 2592000000 - elapsed; // 30 Days
+    const daysLeft = Math.ceil(timeLeft / (1000 * 60 * 60 * 24));
+
+    if (timeLeft > 0) {
+      if (msgEl) {
+        msgEl.textContent = `✅ LICENSE ACTIVE — ${daysLeft} DAYS REMAINING`;
+        msgEl.style.color = 'var(--green)';
+      }
+      if (badge) {
+        badge.style.display = 'block';
+        badge.style.background = 'rgba(16,185,129,0.05)';
+        badge.style.borderColor = 'rgba(16,185,129,0.2)';
+      }
+      if (timerEl) {
+        timerEl.textContent = `${daysLeft} days left`;
+        timerEl.style.color = 'var(--green)';
+      }
+      if (startBtn) startBtn.disabled = false;
+      return;
+    } else {
+      // License Expired
+      if (msgEl) {
+        msgEl.textContent = '❌ LICENSE EXPIRED — RENEWAL REQUIRED';
+        msgEl.style.color = 'var(--red)';
+      }
+      if (startBtn) startBtn.disabled = true;
     }
-    if (badge) badge.style.display = 'none';
-    if (startBtn) startBtn.disabled = false;
-    clearInterval(trialTimerInterval);
-  } else {
-    const trialLeft = 3600000 - (Date.now() - installTime);
+  }
+
+  // Fallback to Trial logic if no license or license expired
+  if (!isValidLicense(key)) {
+    const trialLeft = 3600000 - (now - installTime);
     if (trialLeft > 0) {
       if (badge) badge.style.display = 'block';
     } else {
@@ -723,35 +748,51 @@ function updateSubscriptionStatus(key, installTime) {
       if (badge) {
         badge.style.background = 'rgba(244,63,94,0.1)';
         badge.style.borderColor = 'var(--red)';
-        document.getElementById('trial-timer').style.color = 'var(--red)';
-        document.getElementById('trial-timer').textContent = 'EXPIRED';
+        if (timerEl) {
+          timerEl.style.color = 'var(--red)';
+          timerEl.textContent = 'EXPIRED';
+        }
       }
+      if (startBtn) startBtn.disabled = true;
     }
   }
 }
 
-function startTrialCountdown(installTime) {
+function startTrialCountdown(installTime, activationDate, key) {
   const timerEl = document.getElementById('trial-timer');
   const badge = document.getElementById('trial-badge');
-  
+  if (trialTimerInterval) clearInterval(trialTimerInterval);
+
   const tick = () => {
     const now = Date.now();
+    
+    // If License is active, show days
+    if (isValidLicense(key) && activationDate) {
+       const timeLeft = 2592000000 - (now - activationDate);
+       const days = Math.ceil(timeLeft / 86400000);
+       if (days > 0) {
+         timerEl.textContent = `${days} days left`;
+         return;
+       }
+    }
+
+    // Otherwise show trial timer
     const elapsed = now - installTime;
     const timeLeft = 3600000 - elapsed;
 
     if (timeLeft <= 0) {
       timerEl.textContent = 'EXPIRED';
       timerEl.style.color = 'var(--red)';
-      badge.style.background = 'rgba(244,63,94,0.1)';
+      if (badge) badge.style.background = 'rgba(244,63,94,0.1)';
       clearInterval(trialTimerInterval);
-      updateSubscriptionStatus('', installTime);
+      updateSubscriptionStatus(key, installTime, activationDate);
       return;
     }
 
     const mins = Math.floor(timeLeft / 60000);
     const secs = Math.floor((timeLeft % 60000) / 1000);
     timerEl.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs} left`;
-    badge.style.display = 'block';
+    if (badge) badge.style.display = 'block';
   };
 
   tick();
@@ -763,9 +804,13 @@ async function activateLicense() {
   if (!key) return showToast('Please enter a license key', true);
 
   if (isValidLicense(key)) {
-    await chrome.storage.local.set({ licenseKey: key });
-    showToast('🚀 License Activated! Lifetime access granted.');
-    location.reload(); // Reload to refresh all status
+    // Save new key AND reset activation date to "Now" to start a new 30-day period
+    await chrome.storage.local.set({ 
+      licenseKey: key, 
+      activationDate: Date.now() 
+    });
+    showToast('🚀 License Activated! 30 days of access granted.');
+    location.reload(); 
   } else {
     showToast('❌ Invalid License Key. Check your entry or contact support.', true);
   }

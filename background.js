@@ -42,6 +42,7 @@ const BASE_URL     = () => USE_TESTNET ? TEST_BASE : LIVE_BASE;
 
 let INSTALL_TIME   = 0;
 const TRIAL_DURATION = 3600000; // 1 Hour in ms
+const LICENSE_DURATION = 2592000000; // 30 Days in ms
 
 // Heartbeat to prevent suspension (Visual only for dashboard)
 setInterval(() => {
@@ -351,6 +352,7 @@ async function runCycle() {
     }
 
     if (!ACTIVE_TRADE) {
+      const now = await getSecureTime();
       broadcastStatus(true, `🔍 Cycle ${IDLE_SCAN_COUNT+1} Done. No signal found (Waiting...)`);
     }
     IDLE_SCAN_COUNT++; 
@@ -1219,8 +1221,24 @@ async function syncWithBinanceTime() {
   }
 }
 function isSubscriptionActive() {
-  if (LICENSE_VALID) return true;
-  const trialLeft = TRIAL_DURATION - (Date.now() - INSTALL_TIME);
+  const now = Date.now();
+  if (LICENSE_VALID) {
+    // If we have an activation date, check if 30 days have passed
+    chrome.storage.local.get(['activationDate'], (d) => {
+       if (d.activationDate) {
+         const elapsed = now - d.activationDate;
+         if (elapsed > LICENSE_DURATION) {
+            LICENSE_VALID = false; // Expired
+         }
+       } else {
+         // First time seeing this valid license, start the 30-day clock
+         chrome.storage.local.set({ activationDate: now });
+       }
+    });
+    return LICENSE_VALID;
+  }
+  
+  const trialLeft = TRIAL_DURATION - (now - INSTALL_TIME);
   return trialLeft > 0;
 }
 
@@ -1229,6 +1247,20 @@ function validateLicenseKey(key) {
   if (!key) return false;
   // Professional Secret Pattern: FUTURES-AI-PRO-XXXX
   return key.trim().toUpperCase().startsWith('FUTURES-AI-PRO-');
+}
+
+/** 
+ * getSecureTime - Fetches world time to prevent PC clock "cheating"
+ */
+async function getSecureTime() {
+  try {
+    const res = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC', { cache: 'no-store' });
+    const data = await res.json();
+    return new Date(data.utc_datetime).getTime();
+  } catch (e) {
+    log('⚠️ Secure Time Fetch failed, using system time.');
+    return Date.now();
+  }
 }
 
 async function getTicker24h(symbol) {
