@@ -799,64 +799,78 @@ function log(msg, detail = '') {
 }
 
 /* ══════════════════════════════════════════════════════════
-   GEMINI AI — Signal Filter + Chatbot
+   GROK AI (xAI) — Signal Filter + Chatbot
 ══════════════════════════════════════════════════════════ */
 
-/* ── Gemini Signal Confirmation (called before every trade) ─ */
-async function geminiConfirmSignal(symbol, direction, price, rsi, ema50, strategy) {
-  if (!GEMINI_KEY) return true; // If no key, skip filter and trade anyway
+const GROK_MODEL = 'grok-3-fast';
+const GROK_URL   = 'https://api.x.ai/v1/chat/completions';
 
-  const prompt = `You are a professional crypto futures analyst.
-A trading bot generated a ${direction} signal on ${symbol} using the ${strategy} strategy.
+/* ── Helper: Call Grok API ─────────────────────────────── */
+async function callGrok(systemPrompt, userMessage, maxTokens = 200, temp = 0.3) {
+  if (!GEMINI_KEY) return null;
+
+  const res = await fetchWT(GROK_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GEMINI_KEY}`
+    },
+    body: JSON.stringify({
+      model: GROK_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userMessage }
+      ],
+      temperature: temp,
+      max_tokens: maxTokens
+    })
+  }, 15000);
+
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || 'Grok API error');
+  return data.choices?.[0]?.message?.content || '';
+}
+
+/* ── Grok Signal Confirmation (called before every trade) ── */
+async function geminiConfirmSignal(symbol, direction, price, rsi, ema50, strategy) {
+  if (!GEMINI_KEY) return true; // No key → skip filter, allow trade
+
+  const system = `You are a professional crypto futures analyst. Respond with ONLY a JSON object, no extra text.`;
+
+  const user = `A trading bot generated a ${direction} signal on ${symbol} using the ${strategy} strategy.
 
 Current data:
 - Price: $${price.toFixed(2)}
 - RSI(14): ${rsi}
 - EMA(50): $${ema50}
-- Signal Direction: ${direction}
 
-Should this trade be executed? Consider momentum, RSI levels, and whether the signal makes technical sense.
-
-Respond with ONLY a valid JSON object. No explanation, no extra text:
-{"action": "CONFIRM"} or {"action": "SKIP", "reason": "one sentence"}`;
+Should this trade be executed? Consider momentum and whether the signal makes technical sense.
+Respond: {"action": "CONFIRM"} or {"action": "SKIP", "reason": "one sentence"}`;
 
   try {
-    const res = await fetchWT(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 80 }
-        })
-      }, 12000
-    );
-    const data = await res.json();
-    if (data.error) { log('Gemini filter error', data.error.message); return true; }
+    const rawText = await callGrok(system, user, 80, 0.1);
+    if (!rawText) return true;
 
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    // Extract JSON even if wrapped in markdown
     const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
-    if (!jsonMatch) return true; // Can't parse → allow trade
+    if (!jsonMatch) return true;
 
     const parsed = JSON.parse(jsonMatch[0]);
     if (parsed.action === 'SKIP') {
-      log('🤖 Gemini skip reason:', parsed.reason || 'low confidence');
+      log('🤖 Grok skip reason:', parsed.reason || 'low confidence');
       return false;
     }
-    return true; // CONFIRM
+    return true;
   } catch (e) {
-    log('Gemini filter exception', e.message);
-    return true; // On error, allow trade (fail-safe)
+    log('Grok filter exception', e.message);
+    return true; // Fail-safe: allow trade on error
   }
 }
 
-/* ── Gemini AI Chatbot ────────────────────────────────────── */
+/* ── Grok AI Chatbot ──────────────────────────────────────── */
 async function handleChatQuery(query) {
-  if (!GEMINI_KEY) return '⚠️ Please save your Gemini API Key in Settings → API Keys tab first.';
+  if (!GEMINI_KEY) return '⚠️ Please save your Grok API Key in Settings → API Keys tab first.';
 
-  // Gather live context
+  // Gather live market context
   let context = 'Market context unavailable.';
   try {
     const symbol  = (TRADE_SETTINGS.symbol || 'BTCUSDT').toUpperCase();
@@ -877,34 +891,17 @@ async function handleChatQuery(query) {
     log('Chat context error', e.message);
   }
 
-  const prompt = `You are FUTURES AI Oracle — a sharp, professional crypto trading assistant embedded in a Binance Futures bot. Be concise and helpful. Use short responses.
+  const system = `You are FUTURES AI Oracle — a sharp, professional crypto trading assistant embedded in a Binance Futures bot. Be concise and helpful. Use short responses under 150 words.
 
-LIVE MARKET CONTEXT:
-${context}
+LIVE CONTEXT: ${context}
 
 RULES:
-- If the user asks to LONG/SHORT a coin, reply with: <EXECUTE>{"action":"LONG","symbol":"BTCUSDT"}</EXECUTE> followed by a confirmation message.
-- For any other question, give a professional answer based on the context.
-- Keep responses under 150 words.
-
-USER: "${query}"`;
+- If the user asks to LONG/SHORT a coin, reply with: <EXECUTE>{"action":"LONG","symbol":"BTCUSDT"}</EXECUTE> followed by a confirmation.
+- For any other question, give a professional answer based on the market context.`;
 
   try {
-    const res = await fetchWT(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 300 }
-        })
-      }, 15000
-    );
-    const data = await res.json();
-    if (data.error) return '❌ API Error: ' + data.error.message;
-
-    let reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from Oracle.';
+    let reply = await callGrok(system, query, 300, 0.3);
+    if (!reply) return 'No response from Oracle.';
 
     // Check for trade execution tag
     const execMatch = reply.match(/<EXECUTE>([\s\S]*?)<\/EXECUTE>/);
@@ -915,7 +912,7 @@ USER: "${query}"`;
           reply = reply.replace(execMatch[0], '').trim();
           setTimeout(async () => {
             const p = await getTickerPrice(cmd.symbol);
-            broadcastLog(`🤖 AI Oracle executing ${cmd.action} on ${cmd.symbol}...`);
+            broadcastLog(`🤖 Grok executing ${cmd.action} on ${cmd.symbol}...`);
             await openTrade(cmd.symbol, cmd.action, p);
           }, 300);
         }
@@ -924,6 +921,6 @@ USER: "${query}"`;
 
     return reply;
   } catch (e) {
-    return '⚠️ Oracle offline. Please check your Gemini API Key.';
+    return '⚠️ Oracle offline: ' + e.message;
   }
 }
