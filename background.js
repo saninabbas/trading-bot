@@ -391,7 +391,30 @@ async function monitorActiveTrade() {
   }
 }
 
-function getSignal(symbol, strategy, closes, volumes, candles = null, news = []) {
+async function getSignal(symbol, strategy, closes, volumes, candles = null, news = []) {
+  if (strategy === 'Deep AI') {
+    // 1. AI VERDICT
+    const aiSignal = await signalDeepAI(symbol, candles, news);
+    if (!aiSignal || aiSignal === 'HOLD') return null;
+    if (aiSignal === 'EXIT') return 'EXIT';
+
+    // 2. TECHNICAL VERDICT (RSI/EMA)
+    const techSignal = signalRsiEma(closes, volumes);
+    
+    // 3. TREND VERDICT (24h Chart)
+    const ticker = await getTicker24h(symbol);
+    const change = ticker ? parseFloat(ticker.priceChangePercent) : 0;
+    const trendSignal = change > 0 ? 'LONG' : 'SHORT';
+
+    log(`🔍 Triple Check [${symbol}]: AI:${aiSignal} | Tech:${techSignal} | Trend:${trendSignal} (${change}%)`);
+
+    // CONFLICT RESOLUTION: Only enter if AI and Tech agree AND trend isn't strongly opposing
+    if (aiSignal === 'LONG' && techSignal === 'LONG' && change > -1) return 'LONG';
+    if (aiSignal === 'SHORT' && techSignal === 'SHORT' && change < 1) return 'SHORT';
+
+    return null; // Not enough consensus
+  }
+
   switch (strategy) {
     case 'RSI+EMA':  return signalRsiEma(closes, volumes);
     case 'MACD':     return signalMACD(closes, volumes);
@@ -599,12 +622,21 @@ Answer format: SYMBOL:DIRECTION (e.g. BTCUSDT:LONG). If no viable setup, reply: 
     reply = reply.replace(/[^A-Z:]/g, ''); 
 
     if (reply.includes(':')) {
-      const [symbol, direction] = reply.split(':');
-      if (stats.some(s => s.symbol === symbol)) {
-        broadcastStatus(true, `🎯 AI Verdict: ${symbol} ${direction}`);
-        log('🧠 Deep Intelligence Selection:', symbol, direction);
-        return { coin: symbol, direction, news };
+      const [coin, dir] = reply.split(':');
+      
+      // FINAL HYBRID CHECK FOR AUTONOMOUS BRAIN
+      const candles = await getCandles(coin, '5m', 50);
+      const closes = candles.map(c => parseFloat(c[4]));
+      const techSignal = signalRsiEma(closes, []);
+      
+      if (techSignal !== dir) {
+        log(`🧠 AI Brain rejected by Technical Filter for ${coin} (${dir} vs Tech:${techSignal})`);
+        return { coin: null, news };
       }
+      
+      broadcastStatus(true, `🎯 AI Verdict: ${coin} ${dir}`);
+      log('🧠 Deep Intelligence Selection:', coin, dir);
+      return { coin, direction: dir, news };
     }
 
     broadcastStatus(true, "🧪 AI: No high-conviction signals.");
@@ -1115,5 +1147,13 @@ async function syncWithBinanceTime() {
     log(`🕒 Time Synced. Offset: ${TIME_OFFSET}ms`);
   } catch (e) {
     log('⚠️ Time Sync Failed:', e.message);
+  }
+}
+async function getTicker24h(symbol) {
+  try {
+    const res = await fetchWithTimeout(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`, {}, 5000);
+    return await res.json();
+  } catch (e) {
+    return null;
   }
 }
