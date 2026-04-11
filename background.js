@@ -111,6 +111,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       switch (msg.action) {
+        case 'CHAT_QUERY':
+          const reply = await handleChatQuery(msg.query);
+          sendResponse({ reply });
+          return true;
         case 'VALIDATE_KEY':
           const isValid = await validateLicenseKey(msg.key);
           sendResponse({ valid: isValid });
@@ -207,6 +211,86 @@ async function loadKeys() {
 }
 
 /* ── Start Bot ──────────────────────────────────────────── */
+/* ── AI Chatbot Logic ───────────────────────────────────── */
+async function handleChatQuery(query) {
+  if (!GEMINI_KEY) return 'Please save your Gemini API Key in the Settings first.';
+
+  // Gather light context (latest BTC price, RSI, News)
+  let context = 'Market Context Unavailable.';
+  try {
+    const symbol = 'BTCUSDT';
+    const price = await getTickerPrice(symbol);
+    const candles = await getCandles(symbol, '15m', 100);
+    const closes = candles.map(c => Number(c[4]));
+    const rsiRaw = calcRSI(closes, 14);
+    const rsi = rsiRaw ? rsiRaw[rsiRaw.length - 1].toFixed(2) : 'N/A';
+    const news = await fetchMarketNews();
+    
+    context = `
+    Current Market:
+    - BTC Price: $${price}
+    - BTC 15m RSI: ${rsi}
+    - Latest Headlines: ${news.slice(0, 5).join(' | ')}`;
+  } catch (e) {
+    log('Chatbot context error', e);
+  }
+
+  const prompt = `
+  You are 'FUTURES AI Oracle', a professional, highly intelligent crypto trading assistant deployed inside a Binance Futures bot.
+  You are talking directly to the human trader. Be concise, extremely sharp, and formatting-friendly (use short sentences).
+  
+  CONTEXT:
+  ${context}
+  
+  CURRENT RULES:
+  If the user EXPLICITLY asks you to OPEN a trade (like "Long BTC" or "Short ETH"), you MUST reply with a JSON command inside <EXECUTE> tags, followed by a human message.
+  Example JSON: <EXECUTE>{"action": "LONG", "symbol": "BTCUSDT"}</EXECUTE> Sure, I am opening a long position on BTCUSDT right now!
+  (Symbols must be uppercase and end in USDT, e.g. ETHUSDT).
+  
+  USER SAYS:
+  "${query}"
+  `;
+
+  try {
+    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3 }
+      })
+    }, 10000);
+
+    const data = await res.json();
+    if (data.error) return "API Error: " + data.error.message;
+    
+    let reply = data.candidates[0].content.parts[0].text;
+    
+    // Check for Execution Tags
+    const execMatch = reply.match(/<EXECUTE>(.*?)<\/EXECUTE>/);
+    if (execMatch) {
+      try {
+        const cmd = JSON.parse(execMatch[1]);
+        if (cmd.action && cmd.symbol) {
+           reply = reply.replace(execMatch[0], '').trim();
+           // Trigger Trade asynchronously so we can return reply now
+           setTimeout(async () => {
+             const manualPrice = await getTickerPrice(cmd.symbol);
+             broadcastStatus(true, `🤖 AI ORACLE ${cmd.action} on ${cmd.symbol}...`);
+             await openTrade(cmd.symbol, cmd.action, manualPrice);
+           }, 500);
+        }
+      } catch(e) {
+        log('Error parsing AI trade command', e);
+      }
+    }
+
+    return reply;
+  } catch (error) {
+    return 'Oracle disconnected. Cannot reach neural network.';
+  }
+}
+
 async function startBot() {
   if (BOT_RUNNING) return;
 
@@ -579,11 +663,11 @@ function signalScalping(closes, volumes) {
 /* ── News & Sentiment Engine ────────────────────────────── */
 async function fetchMarketNews() {
   try {
-    // Using a public crypto news feed (Aggregated)
-    const res = await fetchWithTimeout(`https://cryptopanic.com/api/v1/posts/?public=true`, {}, 8000);
+    // Using CryptoCompare public API (No key required for basic news)
+    const res = await fetchWithTimeout(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN`, {}, 8000);
     const data = await res.json();
-    if (!data.results) return [];
-    return data.results.slice(0, 10).map(p => p.title);
+    if (!data.Data) return [];
+    return data.Data.slice(0, 10).map(n => n.title);
   } catch (e) {
     log('News Fetch error:', e.message);
     return [];

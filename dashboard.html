@@ -424,6 +424,28 @@
 <!-- TOAST -->
 <div id="toast" class="toast">✅ Saved!</div>
 
+<!-- AI CHATBOT UI -->
+<button id="chat-toggle-btn">🤖 Oracle</button>
+<div id="chat-container" class="chat-hidden">
+  <div class="chat-header">
+    <div class="chat-title">
+      <span class="pulse-icon" style="color:var(--cyan); margin-right:8px;">●</span>
+      FUTURES AI ORACLE
+    </div>
+    <button id="chat-close-btn">✖</button>
+  </div>
+  <div class="chat-messages" id="chat-messages">
+    <div class="chat-msg bot">
+      <div class="msg-avatar">🤖</div>
+      <div class="msg-bubble">Hello trader. I am the AI Market Oracle. Ask me for market analysis, news updates, or tell me to execute a trade.</div>
+    </div>
+  </div>
+  <div class="chat-input-area">
+    <input type="text" id="chat-input" placeholder="Ask about BTC, or say 'Long ETH'..." autocomplete="off">
+    <button id="chat-send-btn">➤</button>
+  </div>
+</div>
+
 <script src="dashboard.js"></script>
 </body>
 </html>

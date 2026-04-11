@@ -44,6 +44,11 @@ function initDashListeners() {
     if (e.target.id === 'activate-btn')   { activateLicense(); return; }
     if (e.target.id === 'copy-addr-btn')  { copyToClipboard('sub-address', 'Address copied!'); return; }
     if (e.target.id === 'copy-device-btn') { copyToClipboard('device-id-field', 'ID Copied! Send this to support.'); return; }
+    
+    // Chatbot UI Toggles
+    if (e.target.id === 'chat-toggle-btn') { document.getElementById('chat-container').classList.toggle('chat-hidden'); return; }
+    if (e.target.id === 'chat-close-btn') { document.getElementById('chat-container').classList.add('chat-hidden'); return; }
+    if (e.target.id === 'chat-send-btn')   { handleChatSend(); return; }
 
     // 4. Filters & Logs
     const filterBtn = e.target.closest('.filter-btn');
@@ -64,6 +69,14 @@ function initDashListeners() {
   if (leverRange) {
     leverRange.addEventListener('input', function() {
       updateLeverage(this.value);
+    });
+  }
+
+  // Handle Enter key for Chat Input
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') handleChatSend();
     });
   }
 }
@@ -828,6 +841,79 @@ function isValidLicense(key) {
   // Simple check for UI, real check is in background
   if (!key) return false;
   return key.trim().toUpperCase().startsWith('FUTURES-AI-PRO-');
+}
+
+// ── AI Chatbot Logic ──────────────────────────────────────
+async function handleChatSend() {
+  const inputEl = document.getElementById('chat-input');
+  const text = inputEl.value.trim();
+  if (!text) return;
+  
+  inputEl.value = '';
+  appendChatMessage(text, 'user');
+  
+  const typingId = appendTypingIndicator();
+  
+  try {
+    const response = await chrome.runtime.sendMessage({ 
+      action: 'CHAT_QUERY', 
+      query: text 
+    });
+    
+    removeElement(typingId);
+    
+    if (response && response.reply) {
+      appendChatMessage(response.reply, 'bot');
+    } else {
+      appendChatMessage("I'm sorry, I'm having trouble connecting to my neural network right now.", 'bot');
+    }
+  } catch (err) {
+    removeElement(typingId);
+    appendChatMessage("Network error. Cannot reach the Oracle.", 'bot');
+  }
+}
+
+function appendChatMessage(text, sender) {
+  const container = document.getElementById('chat-messages');
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `chat-msg ${sender}`;
+  
+  const avatar = document.createElement('div');
+  avatar.className = 'msg-avatar';
+  avatar.textContent = sender === 'user' ? '👤' : '🤖';
+  
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.textContent = text;
+  
+  msgDiv.appendChild(avatar);
+  msgDiv.appendChild(bubble);
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendTypingIndicator() {
+  const container = document.getElementById('chat-messages');
+  const id = 'typing-' + Date.now();
+  
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'chat-msg bot';
+  msgDiv.id = id;
+  
+  msgDiv.innerHTML = `
+    <div class="msg-avatar">🤖</div>
+    <div class="msg-bubble">
+       <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+    </div>
+  `;
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+  return id;
+}
+
+function removeElement(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
 }
 
 function copyToClipboard(id, msg) {
