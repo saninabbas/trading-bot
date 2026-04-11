@@ -662,11 +662,11 @@ function calcMACD(data, fast = 12, slow = 26, signal = 9) {
 async function openTrade(symbol, direction, currentPrice) {
   const mode       = TRADE_SETTINGS.mode || 'paper';
   const riskPct    = parseFloat(TRADE_SETTINGS.risk || 2) / 100;
-  const leverage   = parseInt(TRADE_SETTINGS.leverage || 5);
-  const slPctInput = parseFloat(TRADE_SETTINGS.stopLoss   || 1.5);
-  const slPct      = (isNaN(slPctInput) || slPctInput <= 0 ? 2.0 : slPctInput) / 100;
-  const tpPctInput = parseFloat(TRADE_SETTINGS.takeProfit || 3);
-  const tpPct      = (isNaN(tpPctInput) || tpPctInput <= 0 ? 3.0 : tpPctInput) / 100;
+  const leverage   = parseInt(TRADE_SETTINGS.leverage || 20);
+  const slPctInput = parseFloat(TRADE_SETTINGS.stopLoss   || 0.5);
+  const slPct      = (isNaN(slPctInput) || slPctInput <= 0 ? 0.5 : slPctInput) / 100;
+  const tpPctInput = parseFloat(TRADE_SETTINGS.takeProfit || 1.0);
+  const tpPct      = (isNaN(tpPctInput) || tpPctInput <= 0 ? 1.0 : tpPctInput) / 100;
   const trailPct   = parseFloat(TRADE_SETTINGS.trailingSl || 0)   / 100;
 
   if (slPctInput <= 0) log('⚠️ Invalid StopLoss detected. Applied 2% Safety Fallback.');
