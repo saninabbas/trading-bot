@@ -9,6 +9,11 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// Health Check (To fix the 404 you see on the main page)
+app.get('/', (req, res) => {
+    res.send("🚀 FUTURES AI License Server is LIVE and Running!");
+});
+
 // CONFIG
 const WALLET_ADDRESS = "0x9d35215728112c055c8d2472560d7e3ec58df135";
 const USDT_CONTRACT = "0x55d398326f99059fF775485246999027B3197955";
