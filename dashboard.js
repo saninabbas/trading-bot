@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   dashboard.js — Full Dashboard Logic
+   dashboard.js — Clean Dashboard Logic
    Handles: navigation, API settings, bot control, trade log
    ═══════════════════════════════════════════════════════ */
 
@@ -9,12 +9,9 @@ let botActive      = false;
 let tradeLog       = [];
 let allTrades      = [];
 let currentFilter  = 'all';
-let dashStyle      = 'pro'; // 'pro' or 'lite'
 
 // ── Init ─────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  initDashSecurity(); // Check PIN first
-  initDashStyle();    // Check UI style
   initDashListeners();
   startClock();
   await loadAllData();
@@ -25,34 +22,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ── Event Listeners ───────────────────────────────────────
 function initDashListeners() {
-  // Use event delegation for better reliability
   document.addEventListener('click', (e) => {
     // 1. Navigation Links
     const navLink = e.target.closest('.nav-link');
-    if (navLink) {
-      showPage(navLink.dataset.page, navLink);
-      return;
-    }
+    if (navLink) { showPage(navLink.dataset.page, navLink); return; }
 
     // 2. Strategy Cards
     const stratCard = e.target.closest('.strategy-big-card');
     if (stratCard) {
       selectBigStrategy(stratCard, stratCard.dataset.strat);
-      // Visual feedback
       stratCard.style.transform = 'scale(0.95)';
       setTimeout(() => stratCard.style.transform = '', 100);
       return;
     }
 
-    // 3. Bot Control Buttons
+    // 3. Bot Control
     if (e.target.id === 'big-start-btn')  { toggleBotDashboard(); return; }
-    if (e.target.id === 'save-pin-btn')   { saveNewPin(); return; }
     if (e.target.id === 'save-api-btn')   { saveApiKeys(); return; }
     if (e.target.id === 'test-conn-btn')  { testConnection(); return; }
-    if (e.target.id === 'close-pos-btn') { forceClosePosition(); return; }
-    if (e.target.id === 'manual-long-btn') { sendManualTrade('LONG'); return; }
-    if (e.target.id === 'manual-short-btn') { sendManualTrade('SHORT'); return; }
-    
+    if (e.target.id === 'close-pos-btn')  { forceClosePosition(); return; }
+
     // 4. Filters & Logs
     const filterBtn = e.target.closest('.filter-btn');
     if (filterBtn) { filterLog(filterBtn.dataset.filter, filterBtn); return; }
@@ -62,38 +51,12 @@ function initDashListeners() {
       clearLog(); return;
     }
 
-    // 5. Visibility Toggle
+    // 5. Visibility Toggle (eye buttons)
     const eyeBtn = e.target.closest('.eye-btn');
     if (eyeBtn) { toggleVis(eyeBtn.dataset.target, eyeBtn); return; }
-
-    // 6. Unlock PIN
-    if (e.target.id === 'unlock-btn') { checkPin(); return; }
-
-    // 7. Dashboard Style Toggles
-    const styleBtn = e.target.closest('.mode-btn');
-    if (styleBtn) { switchDashStyle(styleBtn.dataset.mode); return; }
-
-    // 8. Lite Mode Buttons
-    if (e.target.id === 'lite-toggle-btn') { toggleBotDashboard(); return; }
-    if (e.target.id === 'lite-close-btn')  { forceClosePosition(); return; }
-    if (e.target.id === 'lite-return-btn') { switchDashStyle('pro'); return; }
   });
 
-  // Auto-save Risk Settings on change
-  ['d-daily-target', 'd-auto-switch'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('change', saveAllSettings);
-  });
-
-  // PIN Input enter key
-  const pinInput = document.getElementById('pin-input');
-  if (pinInput) {
-    pinInput.addEventListener('keyup', (e) => {
-      if (e.key === 'Enter') checkPin();
-    });
-  }
-
-  // Leverage slider needs 'input' event, not click
+  // Leverage slider
   const leverRange = document.getElementById('lever-range');
   if (leverRange) {
     leverRange.addEventListener('input', function() {
@@ -116,13 +79,8 @@ function startClock() {
 async function loadAllData() {
   const data = await chrome.storage.local.get([
     'botRunning', 'selectedStrategy', 'stats',
-    'tradeLog', 'apiKey', 'apiSecret', 'useTestnet', 'dashStyle', 'geminiKey'
+    'tradeLog', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey'
   ]);
-
-  if (data.dashStyle) {
-    dashStyle = data.dashStyle;
-    applyDashStyle(dashStyle);
-  }
 
   if (data.botRunning) {
     botActive = true;
@@ -138,7 +96,6 @@ async function loadAllData() {
     allTrades = [...tradeLog];
     renderLogList();
     renderFullLog();
-    renderPnLChart();
   }
   
   const keyEl = document.getElementById('api-key');
@@ -153,7 +110,6 @@ async function loadAllData() {
   
   if (testnetEl) {
     testnetEl.value = data.useTestnet !== false ? 'true' : 'false';
-    // Update live trading label based on testnet setting
     if (modeEl) {
       const liveOption = modeEl.options[1];
       if (data.useTestnet !== false) {
@@ -163,28 +119,11 @@ async function loadAllData() {
       }
     }
   }
-
-  // Load Risk Settings
-  const riskData = await chrome.storage.local.get(['savedSettings']);
-  if (riskData.savedSettings) {
-    const s = riskData.savedSettings;
-    const targetEl = document.getElementById('d-daily-target');
-    const switchEl = document.getElementById('d-auto-switch');
-    if (targetEl && s.dailyTarget) targetEl.value = s.dailyTarget;
-    if (switchEl && s.autoSwitch !== undefined) switchEl.checked = s.autoSwitch;
-  }
-}
-
-async function saveAllSettings() {
-  const settings = getTradeSettings();
-  await chrome.storage.local.set({ savedSettings: settings });
 }
 
 // ── Heartbeat Pulse: Drives Live Updates & Keeps Bot Awake ──
-// Manifest V3 Service Workers sleep after 30s. This pulse wakes them up.
 function startHeartbeatPulse() {
   setInterval(async () => {
-    // 1. Refresh Basic Stats from Storage
     const data = await chrome.storage.local.get(['stats', 'tradeLog', 'botRunning', 'activeTrade']);
     if (data.stats) updateDashboardStats(data.stats);
     
@@ -193,21 +132,18 @@ function startHeartbeatPulse() {
       allTrades = [...tradeLog];
       renderLogList();
       renderFullLog();
-      renderPnLChart();
     }
 
-    // 2. The Pulse: If bot is running, tell background to monitor
     if (data.botRunning) {
-      chrome.runtime.sendMessage({ action: 'HEARTBEAT' });
+      chrome.runtime.sendMessage({ action: 'HEARTBEAT', strategy: selectedStrat }).catch(()=>{});
     }
 
-    // 3. Sync active position if it changed or exists
     if (data.activeTrade) {
       updateActivePositionUI(data.activeTrade);
     } else {
       updateActivePositionUI(null);
     }
-  }, 5000);
+  }, 15000);
 }
 
 // ── Listen to background messages ────────────────────────
@@ -218,13 +154,12 @@ function listenToBackground() {
       allTrades = [...tradeLog];
       renderLogList();
       renderFullLog();
-      renderPnLChart();
       updateDashboardStats(msg.stats);
       showToast(`✅ ${msg.trade.type} ${msg.trade.symbol} → P&L: ${msg.trade.pnl > 0 ? '+' : ''}$${msg.trade.pnl.toFixed(2)}`);
     }
     if (msg.action === 'BOT_STATUS') {
       botActive = msg.running;
-      applyBotUI(msg.running);
+      applyBotUI(msg.running, msg.statusText, msg.strategy, msg.lastScan);
     }
     if (msg.action === 'POSITION_UPDATE') {
       updateActivePositionUI(msg.position);
@@ -235,8 +170,15 @@ function listenToBackground() {
       showToast(`🔄 Auto-Switch: Using ${msg.newStrategy}`, false);
     }
     if (msg.action === 'TARGET_REACHED') {
-      showToast(`🎯 Daily Target of $${msg.pnl.toFixed(2)} Hit! Securing profits.`, false);
-      // Optional: Add a cinematic celebration effect or popup
+      showToast(`🎯 Daily Target Hit! Securing profits.`, false);
+    }
+    if (msg.action === 'HEARTBEAT') {
+      const pulse = document.getElementById('heartbeat-pulse');
+      if (pulse) {
+        pulse.style.display = 'inline-block';
+        pulse.style.color = '#22d3ee';
+        setTimeout(() => { pulse.style.color = 'transparent'; }, 500);
+      }
     }
   });
 }
@@ -255,16 +197,14 @@ function showPage(name, navEl) {
   currentPage = name;
   const titles = {
     overview: ['Overview', 'Live trading dashboard'],
-    bot:      ['Bot Control', 'Strategy & bot management'],
     trades:   ['Trade Log', 'Full trading history'],
-    settings: ['API Settings', 'Configure Binance API keys'],
-    lite:     ['AI Auto-Pilot', 'Zero Effort Trading']
+    settings: ['Settings', 'Configure API keys & connection']
   };
 
   const titleEl = document.getElementById('page-title');
   const subEl = document.getElementById('page-subtitle');
-  if (titleEl) titleEl.textContent = titles[name][0];
-  if (subEl) subEl.textContent = titles[name][1];
+  if (titleEl && titles[name]) titleEl.textContent = titles[name][0];
+  if (subEl && titles[name]) subEl.textContent = titles[name][1];
 }
 
 // ── Dashboard Stats ───────────────────────────────────────
@@ -287,16 +227,8 @@ function updateDashboardStats(stats) {
     setVal('d-total-trades', stats.totalTrades);
     setVal('d-active-sub',   `${stats.activeTrades || 0} active`);
   }
-  // sidebar
-  document.getElementById('sb-strategy').textContent = stats.strategy || 'No strategy';
-
-  // Lite Mode Update
-  setVal('lite-pnl', (pnl >= 0 ? '$' : '-$') + Math.abs(pnl).toFixed(2));
-  const lpnlPct = document.getElementById('lite-pnl-pct');
-  if (lpnlPct) {
-    lpnlPct.textContent = (pnl >= 0 ? '+' : '') + pct + '%';
-    lpnlPct.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-  }
+  const sbStrat = document.getElementById('sb-strategy');
+  if (sbStrat) sbStrat.textContent = selectedStrat || 'No strategy';
 }
 
 function setVal(id, val) {
@@ -309,73 +241,101 @@ async function toggleBotDashboard() {
   const data = await chrome.storage.local.get(['apiKey']);
   if (!data.apiKey) {
     showToast('⚠️ Please save API Keys first!', true);
-    showPage('settings', document.querySelectorAll('.nav-link')[3]);
+    showPage('settings', document.querySelectorAll('.nav-link')[2]);
     return;
   }
-  botActive = !botActive;
-  applyBotUI(botActive);
-  await chrome.storage.local.set({ botRunning: botActive, selectedStrategy: selectedStrat });
-  chrome.runtime.sendMessage({
-    action: botActive ? 'START_BOT' : 'STOP_BOT',
-    strategy: selectedStrat,
-    settings: getTradeSettings()
-  });
-  showToast(botActive ? `🚀 Bot started — ${selectedStrat}` : '⛔ Bot stopped');
+
+  const settings = getTradeSettings();
+  const targetState = !botActive;
+
+  if (targetState) {
+    // Attempting to START
+    chrome.runtime.sendMessage({
+      action: 'START_BOT',
+      strategy: selectedStrat,
+      settings
+    }, async (res) => {
+      if (chrome.runtime.lastError) {
+        showToast('❌ Background communication error', true);
+        return;
+      }
+      if (res && res.ok) {
+        botActive = true;
+        applyBotUI(true);
+        await chrome.storage.local.set({ botRunning: true, selectedStrategy: selectedStrat, savedSettings: settings });
+        showToast(`🚀 Bot started — ${selectedStrat}`);
+      } else {
+        const errMsg = (res && res.error) ? res.error : 'License required or API error';
+        showToast(`⚠️ Failed to start: ${errMsg}`, true);
+        botActive = false;
+        applyBotUI(false);
+      }
+    });
+  } else {
+    // Attempting to STOP
+    chrome.runtime.sendMessage({ action: 'STOP_BOT' }, async () => {
+      botActive = false;
+      applyBotUI(false);
+      await chrome.storage.local.set({ botRunning: false });
+      showToast('⛔ Bot stopped');
+    });
+  }
 }
 
 function getTradeSettings() {
-  if (dashStyle === 'lite') {
-    return {
-      symbol:    document.getElementById('lite-symbol')?.value || 'BTCUSDT',
-      amount:    document.getElementById('lite-amount')?.value || '100',
-      risk:      '2',
-      leverage:  '5',
-      stopLoss:  '1.5',
-      takeProfit:'3',
-      trailingSl:'0.5',
-      autoCompound: false,
-      mode:      'live' 
-    };
-  }
   return {
     symbol:    document.getElementById('d-symbol')?.value    || 'BTCUSDT',
     amount:    document.getElementById('d-amount')?.value    || '50',
-    risk:      document.getElementById('d-risk')?.value      || '2',
+    risk:      '2',
     leverage:  document.getElementById('lever-range')?.value || '5',
     stopLoss:  document.getElementById('d-sl')?.value        || '1.5',
     takeProfit:document.getElementById('d-tp')?.value        || '3',
-    trailingSl:document.getElementById('d-tsl')?.value       || '0',
-    autoCompound: document.getElementById('d-auto-compound')?.checked || false,
-    dailyTarget:  document.getElementById('d-daily-target')?.value || '20',
-    autoSwitch:   document.getElementById('d-auto-switch')?.checked || false,
+    trailingSl:'0',
+    autoCompound: false,
+    dailyTarget: '20',
+    autoSwitch: false,
     mode:      document.getElementById('d-mode')?.value      || 'paper'
   };
 }
 
-function applyBotUI(running) {
+function applyBotUI(running, statusText = null, activeStrat = null, lastScan = null) {
   const bigDot  = document.getElementById('big-dot');
   const bigTxt  = document.getElementById('big-status-text');
   const bigBtn  = document.getElementById('big-start-btn');
   const sbDot   = document.getElementById('sb-dot');
   const sbStatus= document.getElementById('sb-status');
 
+  const lastCheckEl = document.getElementById('sb-last-check');
+
   if (running) {
     bigDot.className  = 'dot-lg on';
-    bigTxt.textContent= 'BOT RUNNING';
+    bigTxt.textContent= statusText || 'BOT RUNNING';
+    if (sbStatus) sbStatus.textContent = statusText || 'Bot Online';
+    
     bigBtn.className  = 'btn-stop-big';
     bigBtn.innerHTML  = '⛔ STOP BOT';
     sbDot.className   = 'dot-sm on';
-    sbStatus.textContent = 'Bot Online';
+
+    if (lastScan && lastCheckEl) {
+      const timeStr = new Date(lastScan).toLocaleTimeString().slice(0, 8);
+      lastCheckEl.style.display = 'block';
+      lastCheckEl.textContent = '● Last: ' + timeStr;
+      lastCheckEl.style.color = 'var(--cyan)';
+      setTimeout(() => lastCheckEl.style.color = '#94a3b8', 1000);
+    }
   } else {
     bigDot.className  = 'dot-lg off';
     bigTxt.textContent= 'BOT OFFLINE';
+    if (sbStatus) sbStatus.textContent = 'Bot Offline';
+    
     bigBtn.className  = 'btn-start-big';
     bigBtn.innerHTML  = '▶ START BOT ⚡';
     sbDot.className   = 'dot-sm off';
-    sbStatus.textContent = 'Bot Offline';
+    
+    if (lastCheckEl) lastCheckEl.style.display = 'none';
   }
 
-  // Update Topbar Indicator based on Mode
+  // Update Topbar Trading Mode Badge
   const topBadge = document.querySelector('.badge-live');
   const modeVal = document.getElementById('d-mode')?.value;
   const isTestnet = document.getElementById('use-testnet')?.value === 'true';
@@ -399,40 +359,36 @@ function applyBotUI(running) {
       topBadge.classList.remove('pulse-red');
     }
   }
-
-  // Lite Mode Button
-  const liteBtn = document.getElementById('lite-toggle-btn');
-  if (liteBtn) {
-    if (running) {
-      liteBtn.className = 'lite-start-btn running';
-      liteBtn.innerHTML = '⛔ STOP AUTO-PILOT';
-    } else {
-      liteBtn.className = 'lite-start-btn';
-      liteBtn.innerHTML = '🚀 START AUTO-PILOT';
-    }
-  }
 }
 
-// ── Strategy Select (Dashboard) ───────────────────────────
 function selectBigStrategy(el, strategy) {
   document.querySelectorAll('.strategy-big-card').forEach(c => {
     c.className = 'strategy-big-card';
   });
-  const classMap = { 'RSI+EMA':'sel-rsi', MACD:'sel-macd', Scalping:'sel-scalp', 'Deep AI':'sel-break' };
+  const classMap = { 'RSI+EMA':'sel-rsi', MACD:'sel-macd', Scalping:'sel-scalp', 'Deep AI':'sel-ai' };
   el.classList.add(classMap[strategy] || '');
   selectedStrat = strategy;
-  chrome.storage.local.set({ selectedStrategy: strategy });
+
+  chrome.storage.local.remove(['selectedStrategy'], () => {
+    chrome.storage.local.set({ selectedStrategy: strategy });
+  });
+
   document.getElementById('big-strategy-text').textContent = `Strategy: ${strategy}`;
   document.getElementById('sb-strategy').textContent = strategy;
+
+  chrome.runtime.sendMessage({ action: 'UPDATE_STRATEGY', strategy });
 }
 
 function highlightStrategy(strat) {
-  const map = { 'RSI+EMA':'sel-rsi', MACD:'sel-macd', Scalping:'sel-scalp', 'Deep AI':'sel-break' };
+  const map = { 'RSI+EMA':'sel-rsi', MACD:'sel-macd', Scalping:'sel-scalp', 'Deep AI':'sel-ai' };
   document.querySelectorAll('.strategy-big-card').forEach(c => {
     c.className = 'strategy-big-card';
     if (c.dataset.strat === strat) c.classList.add(map[strat] || '');
   });
+  selectedStrat = strat;
   document.getElementById('big-strategy-text').textContent = `Strategy: ${strat}`;
+  const sideStrat = document.getElementById('sb-strategy');
+  if (sideStrat) sideStrat.textContent = strat;
 }
 
 // ── Leverage Slider ───────────────────────────────────────
@@ -453,7 +409,6 @@ function renderLogList() {
       <span style="font-weight:600">${t.symbol}</span>
       <span style="color:var(--muted)">${t.strategy}</span>
       <span class="log-pnl ${t.pnl >= 0 ? 'pos' : 'neg'}">${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}</span>
-      <span style="font-size:10px;color:var(--muted)">Fee: $${(t.amount * 0.0008).toFixed(3)}</span>
       <span class="log-time">${t.time}</span>
     </div>
   `).join('');
@@ -472,22 +427,17 @@ function renderFullLog(filter = currentFilter) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">No trades match this filter.</td></tr>';
     return;
   }
-  tbody.innerHTML = data.map(t => {
-    const fee = t.amount * 0.0008;
-    return `
+  tbody.innerHTML = data.map(t => `
     <tr>
       <td><span class="log-type ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction}</span></td>
       <td style="font-weight:700">${t.symbol}</td>
       <td style="font-family:'JetBrains Mono',monospace">${t.entry}</td>
       <td style="font-family:'JetBrains Mono',monospace">${t.exit}</td>
-      <td class="log-pnl ${t.pnl >= 0 ? 'pos' : 'neg'}">
-        ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}
-        <div style="font-size:10px;color:var(--muted)">Net: $${(t.pnl - fee).toFixed(2)}</div>
-      </td>
+      <td class="log-pnl ${t.pnl >= 0 ? 'pos' : 'neg'}">${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}</td>
       <td style="color:var(--muted)">${t.strategy}</td>
       <td class="log-time">${t.time}</td>
     </tr>
-  `}).join('');
+  `).join('');
 }
 
 function filterLog(type, btn) {
@@ -514,9 +464,14 @@ async function saveApiKeys() {
   if (!key || !secret) { showToast('⚠️ Please enter both API Key and Secret', true); return; }
   
   const isTestnet = testnet === 'true';
-  await chrome.storage.local.set({ apiKey: key, apiSecret: secret, useTestnet: isTestnet, geminiKey: gemini });
+
+  await chrome.storage.local.set({ 
+    apiKey: key, 
+    apiSecret: secret, 
+    useTestnet: isTestnet, 
+    geminiKey: gemini
+  });
   
-  // Update UI Labels immediately
   const modeEl = document.getElementById('d-mode');
   if (modeEl) {
     const liveOption = modeEl.options[1];
@@ -524,66 +479,71 @@ async function saveApiKeys() {
   }
 
   showToast('✅ API Keys & Mode saved!');
-  chrome.runtime.sendMessage({ action: 'UPDATE_KEYS', apiKey: key, apiSecret: secret, useTestnet: isTestnet, geminiKey: gemini });
+  chrome.runtime.sendMessage({ 
+    action: 'UPDATE_KEYS', 
+    apiKey: key, 
+    apiSecret: secret, 
+    useTestnet: isTestnet, 
+    geminiKey: gemini
+  });
 }
 
 async function testConnection() {
   const data = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet']);
   if (!data.apiKey) { showToast('⚠️ Save API Keys first!', true); return; }
   const el = document.getElementById('conn-status');
-  const ogText = el.textContent;
 
-  el.textContent = '🔄 Testing network ping directly...';
+  const baseUrl = data.useTestnet === false ? 'https://fapi.binance.com' : 'https://testnet.binancefuture.com';
+  el.textContent = '🔄 Testing network ping...';
   el.style.color = 'var(--amber)';
 
   try {
-    const baseUrl = data.useTestnet === false ? 'https://fapi.binance.com' : 'https://testnet.binancefuture.com';
-    const pingRes = await fetch(`${baseUrl}/fapi/v1/ping`);
-    if(!pingRes.ok) throw new Error('Ping failed (HTTP ' + pingRes.status + ')');
-    el.textContent = '🔄 Ping OK. Testing API keys...';
+    const pingRes = await fetchWithTimeout(`${baseUrl}/fapi/v1/ping`, {}, 5000);
+    if (!pingRes.ok) throw new Error('Ping failed (HTTP ' + pingRes.status + ')');
+    el.textContent = '🔄 Ping OK. Checking API keys...';
   } catch (err) {
-    el.textContent = `❌ Network Blocked: Cannot reach Binance API (${err.message}). Use VPN!`;
+    el.textContent = `❌ Network Blocked: Cannot reach Binance. Use VPN! (${err.message})`;
     el.style.color = 'var(--red)';
-    showToast('❌ Network request to Binance blocked', true);
+    showToast('❌ Network blocked — enable VPN', true);
     return;
   }
-  
-  let timedOut = false;
-  const timeoutId = setTimeout(() => {
-    timedOut = true;
-    el.textContent = '❌ Failed: Request timed out. (Background network blocked)';
+
+  try {
+    // Sync with Binance time first
+    const timeRes = await fetch(`${baseUrl}/fapi/v1/time`);
+    const timeData = await timeRes.json();
+    const ts = timeData.serverTime;
+    
+    const query = `timestamp=${ts}`;
+    const key  = data.apiKey.trim();
+    const sec  = data.apiSecret.trim();
+
+    const enc  = new TextEncoder();
+    const cryptoKey = await crypto.subtle.importKey('raw', enc.encode(sec), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig  = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(query));
+    const sigHex = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    const balRes = await fetchWithTimeout(`${baseUrl}/fapi/v2/balance?${query}&signature=${sigHex}`, {
+      headers: { 'X-MBX-APIKEY': key }
+    }, 8000);
+
+    if (!balRes.ok) {
+      const errData = await balRes.json().catch(() => ({}));
+      throw new Error(errData.msg || `HTTP ${balRes.status}`);
+    }
+
+    const balData = await balRes.json();
+    const usdt = Array.isArray(balData) ? balData.find(b => b.asset === 'USDT') : null;
+    const balance = usdt ? parseFloat(usdt.balance).toFixed(2) : '?';
+
+    el.textContent = `✅ Connected! Balance: ${balance} USDT (${data.useTestnet === false ? 'Live' : 'Testnet'})`;
+    el.style.color = 'var(--green)';
+    showToast('✅ Binance API connected successfully!');
+  } catch (err) {
+    el.textContent = `❌ API Error: ${err.message}`;
     el.style.color = 'var(--red)';
-    showToast('❌ Connection timed out', true);
-  }, 20000);
-
-  chrome.runtime.sendMessage({ action: 'TEST_CONNECTION' }, (res) => {
-    if (timedOut) return;
-    clearTimeout(timeoutId);
-
-    if (chrome.runtime.lastError) {
-      el.textContent = `❌ Extension Error: ${chrome.runtime.lastError.message}`;
-      el.style.color = 'var(--red)';
-      showToast('❌ Service offline. Refresh the page.', true);
-      return;
-    }
-
-    if (res && res.ok) {
-      let msg = `✅ Connected! Balance: ${res.balance} USDT`;
-      if (res.hedgeMode) {
-        msg += ` | ⚠️ HEDGE MODE DETECTED!`;
-        el.style.color = 'var(--amber)';
-        showToast('⚠️ Please switch to "One-Way Mode" on Binance settings!', true);
-      } else {
-        el.style.color = 'var(--green)';
-        showToast('✅ Binance connected & One-Way Mode verified!');
-      }
-      el.textContent = msg;
-    } else {
-      el.textContent = `❌ Failed: ${res?.error || 'Check your API keys'}`;
-      el.style.color = 'var(--red)';
-      showToast('❌ Connection failed', true);
-    }
-  });
+    showToast('❌ API Test failed: ' + err.message, true);
+  }
 }
 
 function toggleVis(id, btn) {
@@ -600,35 +560,65 @@ function showToast(msg, isError = false) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// ── Manual Trading ───────────────────────────────────────
-async function sendManualTrade(direction) {
-  const symbol = document.getElementById('d-symbol').value;
-  const amount = document.getElementById('d-amount').value;
-  const mode   = document.getElementById('d-mode').value;
-  
-  showToast(`🚀 Sending Manual ${direction} for ${symbol}...`);
-  
-  chrome.runtime.sendMessage({
-    action: 'MANUAL_TRADE',
-    symbol,
-    direction,
-    amount,
-    mode
-  }, (response) => {
-    if (response && response.ok) {
-      showToast(`✅ Manual ${direction} executed!`);
-    } else {
-      showToast(`❌ Manual trade failed: ${response ? response.error : 'Unknown error'}`, true);
-    }
-  });
-}
-
 // ── Position Helper Functions ────────────────────────────
 async function forceClosePosition() {
-  if (!confirm('Are you sure you want to FORCE CLOSE this position at market price?')) return;
+  const btn = document.getElementById('close-pos-btn');
+  const originalText = btn ? btn.innerHTML : '✖ CLOSE POSITION';
+  if (btn) { 
+    btn.disabled = true; 
+    btn.innerHTML = '<span class="status-mini-glow"></span> CLOSING...';
+    btn.classList.add('btn-loading');
+  }
+
+  const safetyTimer = setTimeout(() => {
+    if (btn) { 
+      btn.disabled = false; 
+      btn.innerHTML = '💥 FORCE CLEAR'; 
+      btn.style.borderColor = 'var(--red)';
+      btn.style.color = 'var(--red)';
+      btn.onclick = async () => {
+        if (!confirm('Force clear will remove the trade from the bot locally. Proceed?')) return;
+        chrome.runtime.sendMessage({ action: 'FORCE_CLEAR_TRADE' }, () => {
+          updateActivePositionUI(null);
+          showToast('💥 Local record purged.', true);
+          btn.onclick = forceClosePosition;
+        });
+      };
+    }
+    showToast('⚠️ Close taking longer than expected...', true);
+  }, 6000);
+
   chrome.runtime.sendMessage({ action: 'CLOSE_POSITION' }, (res) => {
-    if (res && res.ok) showToast('✅ Position closed successfully.');
-    else showToast('❌ Close failed: ' + (res ? res.error : 'Unknown'), true);
+    clearTimeout(safetyTimer);
+    if (btn) { 
+      btn.disabled = false; 
+      btn.innerHTML = originalText;
+      btn.classList.remove('btn-loading');
+    }
+
+    if (chrome.runtime.lastError) {
+      showToast('❌ Background error: ' + chrome.runtime.lastError.message, true);
+      return;
+    }
+
+    if (res && res.ok) {
+      showToast('✅ Position closed successfully.');
+      updateActivePositionUI(null);
+    } else {
+      const err = (res ? res.error : 'No response');
+      showToast('❌ Close failed: ' + err, true);
+      
+      if (btn) {
+        btn.innerHTML = '💥 FORCE CLEAR';
+        btn.classList.add('pulse-red');
+        btn.onclick = async () => {
+           chrome.runtime.sendMessage({ action: 'FORCE_CLEAR_TRADE' }, () => {
+             updateActivePositionUI(null);
+             btn.onclick = forceClosePosition;
+           });
+        };
+      }
+    }
   });
 }
 
@@ -643,8 +633,6 @@ function updateActivePositionUI(pos) {
   
   if (!pos) {
     wrap.style.display = 'none';
-    const liteWrap = document.getElementById('lite-active-pos');
-    if (liteWrap) liteWrap.style.display = 'none';
     return;
   }
 
@@ -659,12 +647,11 @@ function updateActivePositionUI(pos) {
   const pctEl = document.getElementById('ap-pnl-pct');
   const badge = document.getElementById('ap-badge');
 
-  // Pulse effect to show it's LIVE
   pnlEl.classList.remove('pulse-lite');
-  void pnlEl.offsetWidth; // trigger reflow
+  void pnlEl.offsetWidth;
   pnlEl.classList.add('pulse-lite');
 
-  const dir = pos.direction || pos.type || 'LONG';
+  const dir = pos.direction || 'LONG';
   badge.textContent = dir;
   badge.className = 'pos-badge ' + dir.toLowerCase();
 
@@ -674,150 +661,18 @@ function updateActivePositionUI(pos) {
   
   pctEl.textContent = (pnl >= 0 ? '+' : '') + pos.pnlPct + '%';
   pctEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+}
 
-  // Lite Mode Active Pos
-  const liteWrap = document.getElementById('lite-active-pos');
-  if (liteWrap) {
-    liteWrap.style.display = 'block';
-    setVal('lap-symbol', pos.symbol);
-    const ldir = document.getElementById('lap-dir');
-    ldir.textContent = dir;
-    ldir.className = 'pos-badge ' + dir.toLowerCase();
-    const lpnl = document.getElementById('lap-pnl');
-    lpnl.textContent = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);
-    lpnl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+// ── Fetch with Timeout ─────────────────────────────────────
+async function fetchWithTimeout(resource, options = {}, timeout = 6000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(resource, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
   }
-}
-
-async function initDashStyle() {
-  const data = await chrome.storage.local.get(['dashStyle']);
-  if (data.dashStyle) {
-    dashStyle = data.dashStyle;
-    applyDashStyle(dashStyle);
-  }
-}
-
-function switchDashStyle(style) {
-  dashStyle = style;
-  chrome.storage.local.set({ dashStyle: style });
-  applyDashStyle(style);
-  showToast(`✨ Dashboard switched to ${style.toUpperCase()} view`);
-}
-
-function applyDashStyle(style) {
-  const isLite = style === 'lite';
-  
-  // Toggle cinematic body class
-  document.body.classList.toggle('is-lite', isLite);
-
-  // Update Buttons
-  document.querySelectorAll('.mode-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.mode === style);
-  });
-
-  // Toggle Visibility
-  const overviewPage = document.getElementById('page-overview');
-  const litePage     = document.getElementById('page-lite');
-  const botLink      = document.querySelector('.nav-link[data-page="bot"]');
-
-  if (isLite) {
-    if (currentPage === 'overview' || currentPage === 'bot') {
-       showPage('lite', null);
-    }
-    botLink.style.display = 'none';
-  } else {
-    if (currentPage === 'lite') {
-       showPage('overview', document.querySelector('.nav-link[data-page="overview"]'));
-    }
-    botLink.style.display = 'flex';
-  }
-}
-async function saveNewPin() {
-  const pin = document.getElementById('new-pin').value;
-  if (pin.length !== 4 || isNaN(pin)) {
-    showToast('⚠️ PIN must be 4 digits', true);
-    return;
-  }
-  await chrome.storage.local.set({ dashPin: pin });
-  document.getElementById('new-pin').value = '';
-  showToast('✅ Security PIN updated!');
-}
-
-// ── Security PIN Logic ──────────────────────────────────
-async function initDashSecurity() {
-  const data = await chrome.storage.local.get(['dashPin']);
-  if (!data.dashPin) {
-    // No PIN set? Set a default 0000 on first run or stay unlocked
-    document.body.classList.remove('is-locked');
-    document.getElementById('pin-overlay').style.display = 'none';
-  }
-}
-
-async function checkPin() {
-  const input = document.getElementById('pin-input').value;
-  const data = await chrome.storage.local.get(['dashPin']);
-  const correctPin = data.dashPin || '0000';
-
-  if (input === correctPin || input === '0000') {
-    document.body.classList.remove('is-locked');
-    document.getElementById('pin-overlay').style.opacity = '0';
-    setTimeout(() => {
-      document.getElementById('pin-overlay').style.display = 'none';
-    }, 300);
-    showToast('🔓 Dashboard Unlocked');
-  } else {
-    const err = document.getElementById('pin-error');
-    err.style.display = 'block';
-    document.getElementById('pin-input').value = '';
-    document.getElementById('pin-input').focus();
-  }
-}
-
-// ── PnL Chart Rendering (Vanilla Canvas) ────────────────
-function renderPnLChart() {
-  const canvas = document.getElementById('pnl-chart');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const width = canvas.width;
-  const height = canvas.height;
-
-  // Clear
-  ctx.clearRect(0, 0, width, height);
-
-  if (allTrades.length < 2) return;
-
-  // Data: Recent 20 trades cumulative PnL
-  const recent = [...allTrades].reverse().slice(-20);
-  let cumulative = 0;
-  const points = recent.map(t => {
-    cumulative += t.pnl;
-    return cumulative;
-  });
-
-  const max = Math.max(...points, 10);
-  const min = Math.min(...points, -10);
-  const range = max - min;
-
-  ctx.beginPath();
-  ctx.strokeStyle = '#10b981';
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'round';
-
-  points.forEach((p, i) => {
-    const x = (i / (points.length - 1)) * width;
-    const y = height - ((p - min) / range) * height;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-
-  ctx.stroke();
-
-  // Gradient fill
-  const grad = ctx.createLinearGradient(0, 0, 0, height);
-  grad.addColorStop(0, 'rgba(16,185,129,0.2)');
-  grad.addColorStop(1, 'rgba(16,185,129,0)');
-  ctx.lineTo(width, height);
-  ctx.lineTo(0, height);
-  ctx.fillStyle = grad;
-  ctx.fill();
 }

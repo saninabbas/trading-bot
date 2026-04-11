@@ -26,120 +26,144 @@ let ACTIVE_TRADE   = null;
 let SYMBOL_RULES   = {}; // Cache for precision
 let DAILY_START_BAL = 0;
 let RESET_DATE     = '';
+let LAST_SWITCH_TIME = 0;
+let STRATEGY_LOCKED_UNTIL = 0;
+let IDLE_SCAN_COUNT = 0; 
+let MONITOR_INTERVAL_ID = null;
+
+let LICENSE_KEY    = '';
+let LICENSE_VALID  = false;
+let TIME_OFFSET    = 0; 
 
 const LIVE_BASE    = 'https://fapi.binance.com';
 const TEST_BASE    = 'https://testnet.binancefuture.com';
 const BASE_URL     = () => USE_TESTNET ? TEST_BASE : LIVE_BASE;
 
-/* ── Message Handler ────────────────────────────────────── */
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  (async () => {
-    switch (msg.action) {
-      case 'START_BOT':
+// Heartbeat to prevent suspension
+setInterval(() => {
+  if (BOT_RUNNING) {
+    chrome.runtime.sendMessage({ action: 'HEARTBEAT', time: Date.now() }).catch(()=>{});
+  }
+}, 5000);
+
+/* ── Master Message Handler ────────────────────────────── */
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // 1. INSTANT SYNC HANDLERS (Must not be blocked by async tasks)
+  if (msg.action === 'GET_SYSTEM_HEALTH') {
+    sendResponse({
+      api: !!API_KEY && !!API_SECRET,
+      ai: !!GEMINI_KEY,
+      mode: USE_TESTNET ? 'TESTNET' : 'LIVE',
+      idleCount: Number(IDLE_SCAN_COUNT) || 0,
+      active: BOT_RUNNING
+    });
+    return false; // Done instantly
+  }
+
+  // 2. ASYNC HANDLERS
+  const handleMessage = async () => {
+    try {
+      if (['START_BOT', 'FORCE_TRADE', 'TEST_CONNECTION', 'CLOSE_POSITION', 'FORCE_CLEAR_TRADE', 'MANUAL_TRADE'].includes(msg.action)) {
         await loadKeys();
-        STRATEGY       = msg.strategy || 'RSI+EMA';
-        TRADE_SETTINGS = msg.settings || {};
-        await startBot();
-        sendResponse({ ok: true });
-        break;
+      }
 
-      case 'STOP_BOT':
-        stopBot();
-        sendResponse({ ok: true });
-        break;
-
-      case 'UPDATE_KEYS':
-        API_KEY     = msg.apiKey;
-        API_SECRET  = msg.apiSecret;
-        USE_TESTNET = msg.useTestnet !== false;
-        GEMINI_KEY  = msg.geminiKey || '';
-        sendResponse({ ok: true });
-        break;
-
-      case 'TEST_CONNECTION':
-        (async () => {
-          try {
-            await Promise.race([
-              loadKeys(),
-              new Promise((_, r) => setTimeout(() => r(new Error('loadKeys hung')), 2000))
-            ]);
-            
-            const bal = await Promise.race([
-              getBalance(),
-              new Promise((_, r) => setTimeout(() => r(new Error('getBalance hung')), 6000))
-            ]);
-
-            const mode = await Promise.race([
-              getPositionMode(),
-              new Promise((_, r) => setTimeout(() => r(new Error('getPositionMode hung')), 4000))
-            ]);
-
-            sendResponse({ ok: true, balance: bal, hedgeMode: mode });
-          } catch (e) {
-            log('❌ Test Connection Failed:', e.message);
-            sendResponse({ ok: false, error: e.message });
-          }
-        })();
-        break;
-
-      case 'MANUAL_TRADE':
-        await loadKeys();
-        try {
-          // Sync settings from manual request
-          TRADE_SETTINGS.symbol = msg.symbol;
-          TRADE_SETTINGS.amount = msg.amount;
-          TRADE_SETTINGS.mode   = msg.mode;
-          
-          if (ACTIVE_TRADE) throw new Error('A trade is already active!');
-
-          const candles = await getCandles(msg.symbol, '1m', 1);
-          const lastPrice = parseFloat(candles[0][4]);
-          
-          await openTrade(msg.symbol, msg.direction, lastPrice);
+      switch (msg.action) {
+        case 'START_BOT':
+          STRATEGY = msg.strategy || 'RSI+EMA';
+          TRADE_SETTINGS = msg.settings || {};
+          const started = await startBot();
+          sendResponse({ ok: started });
+          break;
+        case 'STOP_BOT':
+          stopBot();
           sendResponse({ ok: true });
-        } catch (e) {
-          sendResponse({ ok: false, error: e.message });
-        }
-        break;
-
-      case 'CLOSE_POSITION':
-        try {
-          if (!ACTIVE_TRADE) throw new Error('No active trade to close!');
-          const candles = await getCandles(ACTIVE_TRADE.symbol, '1m', 1);
-          const lastPrice = parseFloat(candles[0][4]);
+          break;
+        case 'FORCE_TRADE':
+          const price = await getTickerPrice(msg.symbol || 'BTCUSDT');
+          broadcastStatus(true, `⚡ FORCING Long on ${msg.symbol || 'BTCUSDT'}...`);
+          await openTrade(msg.symbol || 'BTCUSDT', 'LONG', price);
+          sendResponse({ ok: true });
+          break;
+        case 'MANUAL_TRADE':
+          if (ACTIVE_TRADE) throw new Error('A trade is already open. Close it first.');
+          if (msg.settings) TRADE_SETTINGS = msg.settings;
+          const manualPrice = await getTickerPrice(msg.symbol || 'BTCUSDT');
+          broadcastStatus(true, `🖐 Manual ${msg.direction} on ${msg.symbol || 'BTCUSDT'}...`);
+          await openTrade(msg.symbol || 'BTCUSDT', msg.direction || 'LONG', manualPrice);
+          sendResponse({ ok: true });
+          break;
+        case 'TEST_CONNECTION':
+          const pingRes = await fetch(`${BASE_URL()}/fapi/v1/ping`);
+          if (pingRes.ok) {
+            const bal = await getBalance();
+            sendResponse({ ok: true, balance: bal, mode: USE_TESTNET ? 'Testnet' : 'Live' });
+          } else { sendResponse({ ok: false, error: 'Binance Ping Failed' }); }
+          break;
+        case 'UPDATE_STRATEGY':
+          STRATEGY = msg.strategy;
+          STRATEGY_LOCKED_UNTIL = Date.now() + 600000;
+          chrome.storage.local.set({ selectedStrategy: STRATEGY, strategyLockedUntil: STRATEGY_LOCKED_UNTIL });
+          if (BOT_RUNNING) { 
+            if (INTERVAL_ID) clearInterval(INTERVAL_ID);
+            INTERVAL_ID = setInterval(runCycle, getIntervalMs());
+          }
+          sendResponse({ ok: true });
+          break;
+        case 'CLOSE_POSITION':
+          if (!ACTIVE_TRADE) throw new Error('No active trade');
+          const lastPrice = await getTickerPrice(ACTIVE_TRADE.symbol);
           await closeTrade(lastPrice, 'MANUAL_CLOSE');
           sendResponse({ ok: true });
-        } catch (e) {
-          sendResponse({ ok: false, error: e.message });
-        }
-        break;
-
-      case 'HEARTBEAT':
-        if (ACTIVE_TRADE) await monitorActiveTrade();
-        sendResponse({ ok: true });
-        break;
-
-      default:
-        sendResponse({ ok: false, error: 'Unknown action' });
+          break;
+        case 'UPDATE_KEYS':
+          API_KEY = msg.apiKey; 
+          API_SECRET = msg.apiSecret; 
+          USE_TESTNET = msg.useTestnet !== false; 
+          GEMINI_KEY = msg.geminiKey || '';
+          sendResponse({ ok: true });
+          break;
+        case 'FORCE_CLEAR_TRADE':
+          ACTIVE_TRADE = null;
+          await chrome.storage.local.remove('activeTrade');
+          broadcastPositionUpdate(null);
+          sendResponse({ ok: true });
+          break;
+        case 'HEARTBEAT':
+          if (msg.strategy && msg.strategy !== STRATEGY && Date.now() > STRATEGY_LOCKED_UNTIL) STRATEGY = msg.strategy;
+          if (ACTIVE_TRADE) monitorActiveTrade().catch(()=>{});
+          sendResponse({ ok: true });
+          break;
+        default:
+          sendResponse({ ok: false, error: 'Unknown action' });
+      }
+    } catch (e) {
+      log(`❌ Message Error [${msg.action}]:`, e.message);
+      sendResponse({ ok: false, error: e.message });
     }
-  })();
-  return true; // Keep message channel open
+  };
+
+  handleMessage();
+  return true; 
 });
 
 /* ── Load Keys from Storage ─────────────────────────────── */
 async function loadKeys() {
-  const data = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet', 'activeTrade', 'geminiKey']);
+  const data = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet', 'activeTrade', 'geminiKey', 'licenseKey', 'licenseStatus']);
   API_KEY      = (data.apiKey || '').trim();
   API_SECRET   = (data.apiSecret || '').trim();
   USE_TESTNET  = data.useTestnet !== false;
   ACTIVE_TRADE = data.activeTrade || null;
   GEMINI_KEY   = (data.geminiKey || '').trim();
+  LICENSE_KEY  = (data.licenseKey || '').trim();
+  if (data.licenseStatus) LICENSE_VALID = data.licenseStatus.valid;
 }
 
 /* ── Start Bot ──────────────────────────────────────────── */
 async function startBot() {
   if (BOT_RUNNING) return;
+
   BOT_RUNNING = true;
+  await syncWithBinanceTime();
   log('🚀 Bot started', `Strategy: ${STRATEGY}`);
   await chrome.storage.local.set({ botRunning: true });
   broadcastStatus(true);
@@ -152,6 +176,7 @@ async function startBot() {
   const intervalMs = getIntervalMs();
   if (INTERVAL_ID) clearInterval(INTERVAL_ID);
   INTERVAL_ID = setInterval(runCycle, intervalMs);
+  return true;
 }
 
 /* ── Stop Bot ───────────────────────────────────────────── */
@@ -166,7 +191,7 @@ function stopBot() {
 
 /* ── Get interval based on strategy ────────────────────── */
 function getIntervalMs() {
-  const map = { Scalping: 30000, MACD: 120000, 'Deep AI': 300000, 'RSI+EMA': 60000 };
+  const map = { Scalping: 30000, MACD: 120000, 'Deep AI': 30000, 'RSI+EMA': 30000 };
   return map[STRATEGY] || 60000;
 }
 
@@ -174,111 +199,136 @@ function getIntervalMs() {
 async function runCycle() {
   if (!BOT_RUNNING) return;
   try {
-    const symbol = TRADE_SETTINGS.symbol || 'BTCUSDT';
+    // FORCE RELOAD KEYS BEFORE EVERY CYCLE TO ENSURE NO 'MISSING' ERRORS
+    if (!API_KEY || !API_SECRET) await loadKeys();
     
-    // 0. Check Daily Reset
     await checkDailyReset();
 
-    // 1. Ensure we have symbol rules for precision
-    if (!SYMBOL_RULES[symbol]) {
-      await refreshSymbolRules(symbol);
-    }
+    // 1. Determine Symbols to monitor
+    let symbolsToScan = [TRADE_SETTINGS.symbol || 'BTCUSDT'];
+    let globalNews = [];
 
-    // 2. Fetch candles for Strategy Logic
-    const candles = await getCandles(symbol, getCandleInterval(), 50);
-    if (!candles || candles.length < 30) return;
-    const closes = candles.map(c => parseFloat(c[4]));
+    // Autonomous Brain: If Deep AI selected and no trade, ask Gemini to pick
+    if (!ACTIVE_TRADE && STRATEGY === 'Deep AI') {
+      broadcastStatus(true, "🧠 AI Analysis in progress...");
+      
+      // Wrap AI in a 10-second timeout
+      const verdict = await Promise.race([
+        getAutonomousVerdict(),
+        new Promise(r => setTimeout(() => r({ direction: 'TIMEOUT' }), 10000))
+      ]);
 
-    // 3. If trade is active, check ONLY for Strategy Reversal
-    if (ACTIVE_TRADE) {
-      let reversal = null;
-      switch (STRATEGY) {
-        case 'RSI+EMA':  reversal = signalRsiEma(closes);  break;
-        case 'MACD':     reversal = signalMACD(closes);    break;
-        case 'Scalping': reversal = signalScalping(closes);break;
-        case 'Deep AI':  reversal = null; break;
+      if (verdict.direction === 'TIMEOUT') {
+        broadcastStatus(true, "⚠️ AI Slow. Falling back to Technical Scan...");
+      } else if (verdict.coin && verdict.direction && verdict.direction !== 'HOLD') {
+         // HIGH CONVICTION AI TRADE FOUND
+         broadcastStatus(true, `🚀 AI SIGNAL: ${verdict.direction} on ${verdict.coin}`);
+         await openTrade(verdict.coin, verdict.direction, await getTickerPrice(verdict.coin));
+         return; 
       }
-      if (reversal && reversal !== ACTIVE_TRADE.direction) {
-        log('🔄 Strategy Reversal detected - Closing Position');
-        await closeTrade(closes[closes.length-1], 'STRATEGY_REVERSAL');
+      
+      // FALLBACK: If AI was neutral (NONE) or returned HOLD, perform technical scan on Top 20 instantly
+      if (verdict.direction !== 'TIMEOUT') broadcastStatus(true, "📡 AI Neutral. Running Technical Scanner...");
+      const topCoins = await getTopVolumeCoins(20);
+      const coreCoins = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+      symbolsToScan = [...new Set([...symbolsToScan, ...topCoins, ...coreCoins])];
+      globalNews = verdict.news;
+    } else if (!ACTIVE_TRADE) {
+      const topCoins = await getTopVolumeCoins(20);
+      const coreCoins = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+      symbolsToScan = [...new Set([...symbolsToScan, ...topCoins, ...coreCoins])];
+    }
+
+    // 2. Iterate and Scan
+    let fallbackToRSI = (STRATEGY === 'Deep AI'); 
+    
+    for (const symObj of symbolsToScan) {
+      try {
+        if (!BOT_RUNNING) break;
+        
+        const symbol = typeof symObj === 'string' ? symObj : symObj.symbol;
+        if (ACTIVE_TRADE && ACTIVE_TRADE.symbol !== symbol) continue;
+
+        if (!ACTIVE_TRADE) {
+           broadcastStatus(true, `📡 Scanning ${symbol}... (Looking for Signal)`);
+        }
+
+        if (!SYMBOL_RULES[symbol]) await refreshSymbolRules(symbol);
+
+        const interval = getCandleInterval();
+        const candles = await getCandles(symbol, interval, 120);
+        if (!candles || candles.length < 50) continue;
+        
+        const closes  = candles.map(c => parseFloat(c[4]));
+        const volumes = candles.map(c => parseFloat(c[5]));
+
+        // Detect signal based on current strategy or hybrid fallback
+        const currentCheckStrat = fallbackToRSI ? 'RSI+EMA' : STRATEGY;
+        const signal = await getSignal(symbol, currentCheckStrat, closes, volumes, candles, globalNews);
+
+        if (!signal) {
+           const lastRsi = calcRSI(closes, 14).pop();
+           broadcastStatus(true, `🔍 ${symbol}: RSI ${lastRsi.toFixed(0)} (${fallbackToRSI ? 'Math' : 'AI'})`);
+        } else if (signal === 'LONG' || signal === 'SHORT') {
+           if (!ACTIVE_TRADE) {
+             broadcastStatus(true, `🔥 Launching ${signal} on ${symbol}...`);
+             await openTrade(symbol, signal, closes[closes.length-1]);
+             return; 
+           }
+        }
+
+        if (ACTIVE_TRADE && (signal === 'EXIT' || (signal && signal !== ACTIVE_TRADE.direction))) {
+            const reason = signal === 'EXIT' ? 'SOCIAL_EXIT (NEWS)' : 'STRATEGY_REVERSAL';
+            log(`🔄 ${reason} on ${symbol}`);
+            await closeTrade(closes[closes.length-1], reason);
+            return;
+        }
+      } catch (symbolErr) {
+        log(`⚠️ Error scanning ${typeof symObj === 'string' ? symObj : symObj.symbol}:`, symbolErr.message);
+        continue;
       }
-      return;
+    } // ← end of symbol scan loop
+
+    // 3. Emergency Momentum Entry (If flat for ~1.5 mins - 3 scans)
+    if (!ACTIVE_TRADE && IDLE_SCAN_COUNT >= 3) {
+      broadcastStatus(true, "🚨 BOT IS IMPATIENT! Forcing Momentum Entry...");
+      const topStats = await getTopVolumeCoins(5);
+      if (topStats.length > 0) {
+        const target = topStats.sort((a, b) => Math.abs(b.change) - Math.abs(a.change))[0];
+        const dir = target.change >= 0 ? 'LONG' : 'SHORT';
+        broadcastStatus(true, `🔥 EMERGENCY ACTIVATED: ${dir} on ${target.symbol}`);
+        IDLE_SCAN_COUNT = 0; 
+        await openTrade(target.symbol, dir, await getTickerPrice(target.symbol));
+        return;
+      }
     }
 
-    // 4. No active trade? Look for entry signals
-    let signal = null;
-    switch (STRATEGY) {
-      case 'RSI+EMA':  signal = signalRsiEma(closes);  break;
-      case 'MACD':     signal = signalMACD(closes);    break;
-      case 'Scalping': signal = signalScalping(closes);break;
-      case 'Deep AI':  signal = await signalDeepAI(symbol, candles); break;
+    if (!ACTIVE_TRADE) {
+      broadcastStatus(true, `🔍 Cycle ${IDLE_SCAN_COUNT+1} Done. No signal found (Waiting...)`);
     }
-
-    if (signal) {
-      const lastPrice = closes[closes.length - 1];
-      await openTrade(symbol, signal, lastPrice);
-    }
+    IDLE_SCAN_COUNT++; 
   } catch (e) {
     log('Cycle Error:', e.message);
-  }
-}
-
-/* ── Fast Monitoring Loop for PnL and Stops ───────────────── */
-async function monitorFastLoop() {
-  if (!BOT_RUNNING || !ACTIVE_TRADE) return;
-  await monitorActiveTrade();
-}
-
-async function checkDailyReset() {
-  const now = new Date();
-  const todayStr = now.toDateString();
-  const data = await chrome.storage.local.get(['dailyState', 'stats']);
-  
-  if (!data.dailyState || data.dailyState.date !== todayStr) {
-    const startBal = data.stats?.balance || 1000;
-    const newState = { startBal, date: todayStr };
-    await chrome.storage.local.set({ dailyState: newState });
-    log('📅 Daily Reset:', `New day started. Baseline balance: $${startBal}`);
-    
-    // Reset todayPnl in stats for UI clarity
-    if (data.stats) {
-       data.stats.todayPnl = 0;
-       await chrome.storage.local.set({ stats: data.stats });
-    }
+    broadcastStatus(true, `⚠️ Cycle Error: ${e.message}`);
   }
 }
 
 /* ── Monitor Active Trade ───────────────────────────────── */
 async function monitorActiveTrade() {
+  if (!ACTIVE_TRADE) return;
   const t = ACTIVE_TRADE;
   try {
-    // 1. Get FAST Live Price from Ticker
     const currentPrice = await getTickerPrice(t.symbol);
     
-    // 2. Calculate current PnL
     const pnlPct = t.direction === 'LONG' 
       ? (currentPrice - t.entry) / t.entry 
       : (t.entry - currentPrice) / t.entry;
     
-    const unrealizedPnl = parseFloat((pnlPct * t.amount * t.leverage).toFixed(2));
     t.markPrice = currentPrice;
-    t.pnl = unrealizedPnl;
+    t.pnl = parseFloat((pnlPct * t.amount * t.leverage).toFixed(2));
     t.pnlPct = (pnlPct * 100).toFixed(2);
 
-    // ── Trailing Stop Loss Logic (Ticker-based) ──────────
-    if (t.trailPct > 0) {
-      if (t.direction === 'LONG' && currentPrice > t.highestPrice) {
-        t.highestPrice = currentPrice;
-        const newSl = t.highestPrice * (1 - t.trailPct);
-        if (newSl > t.sl) { t.sl = newSl; log('🛡️ Trailing SL moved UP'); }
-      } else if (t.direction === 'SHORT' && currentPrice < t.lowestPrice) {
-        t.lowestPrice = currentPrice;
-        const newSl = t.lowestPrice * (1 + t.trailPct);
-        if (newSl < t.sl) { t.sl = newSl; log('🛡️ Trailing SL moved DOWN'); }
-      }
-    }
-
-    // ── Update Dashboard & Storage ──────────────────────────
+    // Update Dashboard & Storage
     broadcastPositionUpdate(t);
     await chrome.storage.local.set({ activeTrade: t });
 
@@ -296,15 +346,99 @@ async function monitorActiveTrade() {
       return;
     }
 
-    // 3. Strategy Reversal Check (Only occurs on Strategy Cycle, not Fast Monitor)
-    // We handle this inside runCycle which calls specific strategy signals
+    // Exit Condition 3: Time-Based Rules (30 min limit)
+    const durationMins = (Date.now() - t.openedAt) / 60000;
+    
+    // Rule A: Cross 30 mins and profitable? Close.
+    if (durationMins >= 30 && t.pnl > 0) {
+      log('⌛ Time-based Profit Exit triggered (>30m)');
+      await closeTrade(currentPrice, 'TIME_LIMIT_PROFIT');
+      return;
+    }
+
+    // Rule B: Cross 30 mins, in loss, but price returns to capital (Breakeven)? Close.
+    if (durationMins >= 30 && t.pnl <= 0) {
+      const isRecovered = t.direction === 'LONG' ? (currentPrice >= t.entry) : (currentPrice <= t.entry);
+      if (isRecovered) {
+        log('⌛ Time-based Breakeven Recovery triggered (>30m)');
+        await closeTrade(currentPrice, 'TIME_LIMIT_BREAKEVEN');
+        return;
+      }
+    }
+
+    // Exit Condition 4: Social Exit (Every 5 mins check)
+    if (STRATEGY === 'Deep AI') {
+      const nowS = Math.floor(Date.now() / 1000);
+      if (!t.lastAiCheck || nowS - t.lastAiCheck > 300) {
+        t.lastAiCheck = nowS;
+        const interval = getCandleInterval();
+        const candles = await getCandles(t.symbol, interval, 100);
+        const news = await fetchMarketNews();
+        const signal = await signalDeepAI(t.symbol, candles, news);
+        if (signal === 'EXIT') {
+          log('🚨 Social Exit Triggered (Emergency News)');
+          notify('Emergency Social Exit', `${t.symbol} closed due to negative AI sentiment.`);
+          await closeTrade(currentPrice, 'SOCIAL_EXIT');
+          return;
+        }
+      }
+    }
   } catch (e) {
     log('Monitor error:', e.message);
   }
 }
 
+function getSignal(symbol, strategy, closes, volumes, candles = null, news = []) {
+  switch (strategy) {
+    case 'RSI+EMA':  return signalRsiEma(closes, volumes);
+    case 'MACD':     return signalMACD(closes, volumes);
+    case 'Scalping': return signalScalping(closes, volumes);
+    case 'Deep AI':  return signalDeepAI(symbol, candles, news); 
+    default: return null;
+  }
+}
+
+async function getTopVolumeCoins(limit = 10) {
+  try {
+    const res = await fetchWithTimeout(`${BASE_URL()}/fapi/v1/ticker/24hr`, {}, 8000);
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    
+    // Return objects with stats instead of just symbols
+    return data
+      .filter(t => t.symbol.endsWith('USDT') && !t.symbol.includes('_') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN'))
+      .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+      .slice(0, limit)
+      .map(t => ({
+        symbol: t.symbol,
+        change: parseFloat(t.priceChangePercent),
+        volume: parseFloat(t.quoteVolume)
+      }));
+  } catch (e) {
+    return [];
+  }
+}
+
+async function checkDailyReset() {
+  const now = new Date();
+  const todayStr = now.toDateString();
+  const data = await chrome.storage.local.get(['dailyState', 'stats']);
+  
+  if (!data.dailyState || data.dailyState.date !== todayStr) {
+    const startBal = data.stats?.balance || 1000;
+    const newState = { startBal, date: todayStr };
+    await chrome.storage.local.set({ dailyState: newState });
+    log('📅 Daily Reset:', `New day started. Baseline balance: $${startBal}`);
+    
+    if (data.stats) {
+       data.stats.todayPnl = 0;
+       await chrome.storage.local.set({ stats: data.stats });
+    }
+  }
+}
+
 function getCandleInterval() {
-  const map = { Scalping: '1m', MACD: '15m', 'Deep AI': '1h', 'RSI+EMA': '5m' };
+  const map = { Scalping: '1m', MACD: '15m', 'Deep AI': '5m', 'RSI+EMA': '5m' };
   return map[STRATEGY] || '5m';
 }
 
@@ -312,109 +446,170 @@ function getCandleInterval() {
    STRATEGY ENGINES
    ══════════════════════════════════════════════════════════ */
 
-/* ── Strategy 1: RSI + EMA ──────────────────────────────── */
-function signalRsiEma(closes) {
+/* ── Strategy 1: RSI + EMA (Tuned) ───────────────────────── */
+function signalRsiEma(closes, volumes) {
   const rsi = calcRSI(closes, 14);
   const ema21 = calcEMA(closes, 21);
   const price = closes[closes.length - 1];
   const lastRsi = rsi[rsi.length - 1];
-  const prevRsi = rsi[rsi.length - 2];
   const lastEma = ema21[ema21.length - 1];
 
-  // BUY: RSI crosses above 30 (oversold) AND price > EMA21
-  if (prevRsi < 30 && lastRsi >= 30 && price > lastEma) return 'LONG';
-  // SELL: RSI crosses below 70 (overbought) AND price < EMA21
-  if (prevRsi > 70 && lastRsi <= 70 && price < lastEma) return 'SHORT';
+  // Volume verification DISABLED for max activity
+  // const volEMA = calcEMA(volumes, 20);
+  // if (volumes[volumes.length - 1] < volEMA[volEMA.length - 1] * 0.5) return null;
+
+  // ENTRY: Extreme Sensitivity (49/51)
+  if (lastRsi < 49) return 'LONG';
+  if (lastRsi > 51) return 'SHORT';
+  
   return null;
 }
 
-/* ── Strategy 2: MACD ───────────────────────────────────── */
-function signalMACD(closes) {
+/* ── Strategy 2: MACD (Pro) ─────────────────────────────── */
+function signalMACD(closes, volumes) {
   const macd = calcMACD(closes, 12, 26, 9);
   if (!macd) return null;
   const { macdLine, signalLine } = macd;
   const i = macdLine.length - 1;
 
-  // MACD line crosses above Signal → BUY
+  // Volume verification
+  const volEMA = calcEMA(volumes, 20);
+  if (volumes[volumes.length - 1] < volEMA[volEMA.length - 1]) return null;
+
   if (macdLine[i - 1] < signalLine[i - 1] && macdLine[i] > signalLine[i]) return 'LONG';
-  // MACD line crosses below Signal → SELL
   if (macdLine[i - 1] > signalLine[i - 1] && macdLine[i] < signalLine[i]) return 'SHORT';
   return null;
 }
 
-/* ── Strategy 3: Scalping (9/21 EMA) ───────────────────── */
-function signalScalping(closes) {
+/* ── Strategy 3: Scalping (Fast Cross) ──────────────────── */
+function signalScalping(closes, volumes) {
   const ema9  = calcEMA(closes, 9);
   const ema21 = calcEMA(closes, 21);
   const i = ema9.length - 1;
 
-  // Fast EMA crosses above Slow EMA → BUY
   if (ema9[i - 1] < ema21[i - 1] && ema9[i] > ema21[i]) return 'LONG';
-  // Fast EMA crosses below Slow EMA → SELL
   if (ema9[i - 1] > ema21[i - 1] && ema9[i] < ema21[i]) return 'SHORT';
   return null;
 }
 
-/* ── Strategy 4: Deep AI (Gemini 24h + News API) ────────── */
-async function signalDeepAI(symbol, candles) {
+/* ── News & Sentiment Engine ────────────────────────────── */
+async function fetchMarketNews() {
+  try {
+    // Using a public crypto news feed (Aggregated)
+    const res = await fetchWithTimeout(`https://cryptopanic.com/api/v1/posts/?public=true`, {}, 8000);
+    const data = await res.json();
+    if (!data.results) return [];
+    return data.results.slice(0, 10).map(p => p.title);
+  } catch (e) {
+    log('News Fetch error:', e.message);
+    return [];
+  }
+}
+
+/* ── Strategy 4: Deep AI (Gemini 24h + News Intelligence) ─ */
+async function signalDeepAI(symbol, candles, news = []) {
   if (!GEMINI_KEY) {
-    log('❌ Deep AI Error', 'Gemini API Key is missing. Add it in settings.');
-    notify('Deep AI Error', 'Please paste your Gemini API Key in the Settings page.');
+    log('❌ Gemini Key Missing');
     return null;
   }
   
-  // Format candles into a readable summary for AI
-  const recent = candles.slice(-24); // Last 24 hours if using 1h interval
-  if(recent.length < 10) return null;
-  
+  const recent = candles.slice(-24);
   const open = recent[0][1];
   const close = recent[recent.length-1][4];
   const high = Math.max(...recent.map(c => parseFloat(c[2])));
   const low = Math.min(...recent.map(c => parseFloat(c[3])));
-  const prices = recent.map(c => parseFloat(c[4])).join(', ');
+  const prices = recent.map(c => parseFloat(c[4])).slice(-10).join(', ');
+  const recentNews = news.join(' | ');
 
   const prompt = `
-You are an expert crypto trading Artificial Intelligence. Analyze this recent market data for ${symbol}.
-- Open: ${open}
-- Close: ${close} 
-- High: ${high}
-- Low: ${low}
-- Recent Close Prices Sequence: [${prices}]
+You are an autonomous Crypto Trading AI. Analyze this combo for ${symbol}:
+TECH DATA: Open ${open}, Close ${close}, High ${high}, Low ${low}. Recent Prices: [${prices}].
+NEWS HEADLINES: ${recentNews || 'No major news found.'}
 
-As a highly protective AI, should the bot take a LONG trade, a SHORT trade, or HOLD?
-Reply ONLY with exactly one word: LONG, SHORT, or HOLD.
+TASK:
+1. If news is extremely negative/scandalous for this coin, reply: EXIT.
+2. If news + technicals are strong bull, reply: LONG.
+3. If news + technicals are strong bear, reply: SHORT.
+4. Otherwise, reply: HOLD.
+
+Reply ONLY one word: LONG, SHORT, EXIT, or HOLD.
 `;
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
+    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 10 }
       })
-    });
+    }, 10000);
     
-    if (!res.ok) {
-      log('❌ Gemini HTTP Error:', res.status);
-      return null;
-    }
-
     const json = await res.json();
-    if (json.error) {
-      log('❌ Gemini API Error:', json.error.message);
-      return null;
+    const reply = json.candidates[0].content.parts[0].text.trim().toUpperCase();
+    log(`🧠 AI Verdict for ${symbol}:`, reply);
+    return reply;
+  } catch (e) {
+    log('Gemini Deep AI error:', e.message);
+    return null;
+  }
+}
+
+/* ── Autonomous Market Verdict (The Brain) ───────────────── */
+async function getAutonomousVerdict() {
+  broadcastStatus(true, "🧠 AI Analyzing Global News...");
+  const news = await fetchMarketNews();
+  
+  broadcastStatus(true, "📡 AI Scanning Market Stats...");
+  const stats = await getTopVolumeCoins(20);
+  const coinList = stats.map(s => `${s.symbol} (24h: ${s.change}%, Vol: $${(s.volume/1000000).toFixed(1)}M)`).join(', ');
+  
+  broadcastStatus(true, "🧪 AI Analyzing Momentum...");
+  
+  const prompt = `
+Analyze these top 20 crypto coins and their 24h momentum: ${coinList}.
+Latest Market News: ${news.join(' | ')}.
+
+TASK: Identify the SINGLE best coin for an immediate breakout trade.
+Guidelines:
+1. Low-Volatility pairs should be ignored.
+2. If news is positive and price is up >2%, look for LONG.
+3. If news is negative and price is down >2%, look for SHORT.
+4. BE EAGER. We want to trade!
+
+Answer format: SYMBOL:DIRECTION (e.g. BTCUSDT:LONG). If no viable setup, reply: NONE.
+`;
+  
+  try {
+    const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 10 }
+      })
+    }, 8000);
+    const json = await res.json();
+    if (!json.candidates || !json.candidates[0].content.parts[0].text) return { coin: null, news };
+    
+    let reply = json.candidates[0].content.parts[0].text.trim().toUpperCase();
+    reply = reply.replace(/[^A-Z:]/g, ''); 
+
+    if (reply.includes(':')) {
+      const [symbol, direction] = reply.split(':');
+      if (stats.some(s => s.symbol === symbol)) {
+        broadcastStatus(true, `🎯 AI Verdict: ${symbol} ${direction}`);
+        log('🧠 Deep Intelligence Selection:', symbol, direction);
+        return { coin: symbol, direction, news };
+      }
     }
 
-    const reply = json.candidates[0].content.parts[0].text.trim().toUpperCase();
-    log('🧠 Deep AI Decision:', reply);
-    
-    if (reply.includes('LONG')) return 'LONG';
-    if (reply.includes('SHORT')) return 'SHORT';
-    return null;
+    broadcastStatus(true, "🧪 AI: No high-conviction signals.");
+    return { coin: null, news };
   } catch (e) {
-    log('❌ Gemini Fetch Error:', e.message);
-    return null;
+    log('Brain Verdict error:', e.message);
+    broadcastStatus(true, "⚠️ AI Processing Error");
+    return { coin: null, news: [] };
   }
 }
 
@@ -468,9 +663,13 @@ async function openTrade(symbol, direction, currentPrice) {
   const mode       = TRADE_SETTINGS.mode || 'paper';
   const riskPct    = parseFloat(TRADE_SETTINGS.risk || 2) / 100;
   const leverage   = parseInt(TRADE_SETTINGS.leverage || 5);
-  const slPct      = parseFloat(TRADE_SETTINGS.stopLoss   || 1.5) / 100;
-  const tpPct      = parseFloat(TRADE_SETTINGS.takeProfit || 3)   / 100;
+  const slPctInput = parseFloat(TRADE_SETTINGS.stopLoss   || 1.5);
+  const slPct      = (isNaN(slPctInput) || slPctInput <= 0 ? 2.0 : slPctInput) / 100;
+  const tpPctInput = parseFloat(TRADE_SETTINGS.takeProfit || 3);
+  const tpPct      = (isNaN(tpPctInput) || tpPctInput <= 0 ? 3.0 : tpPctInput) / 100;
   const trailPct   = parseFloat(TRADE_SETTINGS.trailingSl || 0)   / 100;
+
+  if (slPctInput <= 0) log('⚠️ Invalid StopLoss detected. Applied 2% Safety Fallback.');
 
   let amount = parseFloat(TRADE_SETTINGS.amount || 50);
 
@@ -524,9 +723,10 @@ async function openTrade(symbol, direction, currentPrice) {
     } catch (e) {
       log('❌ Live order failed:', e.message);
       let cleanMsg = e.message;
-      if (e.message.includes('notional')) cleanMsg = "Amount too small for Binance (Min ~$5-10)";
-      if (e.message.includes('API-key'))   cleanMsg = "Invalid API Key or Permissions";
+      if (e.message.includes('notional')) cleanMsg = "Min Notional Error ($10 min required)";
+      if (e.message.includes('API-key'))   cleanMsg = "Check API Keys/IP Restrictions";
       
+      broadcastStatus(true, `❌ ORDER ERROR: ${cleanMsg}`);
       notify('Order Failed', `Binance says: ${cleanMsg}`);
       throw new Error(`Binance Rejected: ${cleanMsg}`);
     }
@@ -549,11 +749,13 @@ async function openTrade(symbol, direction, currentPrice) {
     leverage,
     mode:     realOrderOk ? 'LIVE' : 'PAPER',
     time:     new Date().toLocaleTimeString(),
+    openedAt: Date.now(),
     pnl:      0,
     pnlPct:   0
   };
 
   await chrome.storage.local.set({ activeTrade: ACTIVE_TRADE });
+  IDLE_SCAN_COUNT = 0; // Reset after successful trade
   
   // Update stats/balance immediately if Live
   if (realOrderOk) {
@@ -576,44 +778,63 @@ async function closeTrade(exitPrice, reason) {
   if (!ACTIVE_TRADE) return;
   const t = ACTIVE_TRADE;
 
+  log(`🔄 Attempting to close trade: ${t.symbol} (${reason})`);
+
+  if (t.mode === 'LIVE' && API_KEY && API_SECRET) {
+    try {
+      await cancelAllOpenOrders(t.symbol); 
+      const reverseDir = t.direction === 'LONG' ? 'SHORT' : 'LONG';
+      await placeMarketOrder(t.symbol, reverseDir, t.qty);
+      log('✅ Binance exit order successful');
+    } catch (e) {
+      log('❌ Live close failed (Network/API):', e.message);
+      // We DO NOT clear the local state here, so the user can retry manual close.
+      throw new Error('Exchange close failed: ' + e.message);
+    }
+  }
+
+  // Safety: ensure exitPrice is always a valid number
+  if (!exitPrice || isNaN(exitPrice) || exitPrice <= 0) {
+    exitPrice = t.markPrice || t.entry;
+    log('⚠️ Invalid exitPrice - falling back to markPrice:', exitPrice);
+  }
+
   // Final PnL calculation
   const pnlPct = t.direction === 'LONG' ? (exitPrice - t.entry) / t.entry : (t.entry - exitPrice) / t.entry;
   const pnl = parseFloat((pnlPct * t.amount * t.leverage).toFixed(2));
 
-  if (t.mode === 'LIVE' && API_KEY && API_SECRET) {
-    try {
-      await cancelAllOpenOrders(t.symbol); // Clear Hard SL/TP
-      const reverseDir = t.direction === 'LONG' ? 'SHORT' : 'LONG';
-      await placeMarketOrder(t.symbol, reverseDir, t.qty);
-    } catch (e) {
-      log('❌ Live close failed:', e.message);
-    }
-  }
-
   const finishedTrade = {
     ...t,
-    exit: exitPrice.toFixed(2),
+    exit: parseFloat(exitPrice).toFixed(2),
     pnl,
     reason,
     closeTime: new Date().toLocaleTimeString()
   };
 
+  // State clearing happens ONLY after success
   ACTIVE_TRADE = null;
   await chrome.storage.local.remove('activeTrade');
   
-  // ── Auto-Switch Strategy on Loss ──
-  if (reason === 'STOP_LOSS' && TRADE_SETTINGS.autoSwitch) {
-    const currentIndex = STRATEGY_LIST.indexOf(STRATEGY);
-    const nextIndex = (currentIndex + 1) % STRATEGY_LIST.length;
-    const newStrategy = STRATEGY_LIST[nextIndex];
-    log('🔄 AUTO-SWITCHING STRATEGY due to loss:', `${STRATEGY} -> ${newStrategy}`);
-    STRATEGY = newStrategy;
-    chrome.storage.local.set({ selectedStrategy: newStrategy });
-    chrome.runtime.sendMessage({ action: 'STRATEGY_CHANGED', newStrategy });
+  // ── Auto-Switch Strategy on Loss (and all other reasons if enabled) ──
+  const now = Date.now();
+  const shouldSwitch = (reason === 'STOP_LOSS' || reason === 'STRATEGY_REVERSAL') && TRADE_SETTINGS.autoSwitch;
+  
+  if (shouldSwitch) {
+    if (now < STRATEGY_LOCKED_UNTIL) {
+       log('🛡️ Auto-Switch BLOCKED: Strategy is currently locked by user manual selection.');
+    } else if (now - LAST_SWITCH_TIME > 60000) { 
+       LAST_SWITCH_TIME = now;
+       const currentIndex = STRATEGY_LIST.indexOf(t.strategy);
+       const nextIndex = (currentIndex + 1) % STRATEGY_LIST.length;
+       const newStrategy = STRATEGY_LIST[nextIndex];
+       log('🔄 AUTO-SWITCHING STRATEGY:', `${t.strategy} -> ${newStrategy}`);
+       STRATEGY = newStrategy;
+       chrome.storage.local.set({ selectedStrategy: newStrategy });
+       chrome.runtime.sendMessage({ action: 'STRATEGY_CHANGED', newStrategy });
+    }
   }
 
   await saveTrade(finishedTrade);
-  
   broadcastPositionUpdate(null);
   notify(`🏁 Trade Closed (${reason})`, `PnL: ${pnl >= 0 ? '+' : ''}$${pnl}`);
   log(`🏁 Trade Closed: ${reason}`, `PnL: ${pnl}`);
@@ -667,10 +888,10 @@ async function saveTrade(trade) {
 
 async function getBalance() {
   const path = '/fapi/v2/account';
-  const params = `timestamp=${Date.now()}&recvWindow=10000`;
+  const params = `timestamp=${Date.now() + TIME_OFFSET}&recvWindow=10000`;
   const sig    = await sign(params);
   const url    = `${BASE_URL()}${path}?${params}&signature=${sig}`;
-  const res    = await fetch(url, { headers: { 'X-MBX-APIKEY': API_KEY } });
+  const res    = await fetchWithTimeout(url, { headers: { 'X-MBX-APIKEY': API_KEY } }, 7000);
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({}));
     throw new Error(errorBody.msg || `HTTP ${res.status}`);
@@ -682,14 +903,14 @@ async function getBalance() {
 
 async function getCandles(symbol, interval, limit) {
   const url = `${BASE_URL()}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, 5000);
   if (!res.ok) throw new Error(`Klines HTTP ${res.status}`);
   return res.json();
 }
 
 async function getTickerPrice(symbol) {
   const url = `${BASE_URL()}/fapi/v1/ticker/price?symbol=${symbol}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, 5000);
   if (!res.ok) throw new Error(`Ticker HTTP ${res.status}`);
   const json = await res.json();
   return parseFloat(json.price);
@@ -697,18 +918,18 @@ async function getTickerPrice(symbol) {
 
 async function setLeverage(symbol, leverage) {
   const path   = '/fapi/v1/leverage';
-  const params = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
+  const params = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now() + TIME_OFFSET}`;
   const sig    = await sign(params);
   const body   = `${params}&signature=${sig}`;
-  await fetch(`${BASE_URL()}${path}`, {
+  await fetchWithTimeout(`${BASE_URL()}${path}`, {
     method: 'POST', headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' },
     body
-  });
+  }, 5000);
 }
 
 async function refreshSymbolRules(symbol) {
   try {
-    const res = await fetch(`${BASE_URL()}/fapi/v1/exchangeInfo`);
+    const res = await fetchWithTimeout(`${BASE_URL()}/fapi/v1/exchangeInfo`, {}, 10000);
     const json = await res.json();
     const s = json.symbols.find(x => x.symbol === symbol);
     if (s) {
@@ -742,11 +963,11 @@ function formatQty(symbol, qty) {
 
 async function getPositionMode() {
   const path = '/fapi/v1/positionSide/dual';
-  const params = `timestamp=${Date.now()}`;
+  const params = `timestamp=${Date.now() + TIME_OFFSET}`;
   const sig = await sign(params);
-  const res = await fetch(`${BASE_URL()}${path}?${params}&signature=${sig}`, {
+  const res = await fetchWithTimeout(`${BASE_URL()}${path}?${params}&signature=${sig}`, {
     headers: { 'X-MBX-APIKEY': API_KEY }
-  });
+  }, 7000);
   if (!res.ok) return false;
   const json = await res.json();
   return json.dualSidePosition; // true if Hedge Mode
@@ -755,35 +976,36 @@ async function getPositionMode() {
 async function placeMarketOrder(symbol, side, qty) {
   const path = '/fapi/v1/order';
   const binSide = side === 'LONG' ? 'BUY' : 'SELL';
-  const params = `symbol=${symbol}&side=${binSide}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
+  const params = `symbol=${symbol}&side=${binSide}&type=MARKET&quantity=${qty}&timestamp=${Date.now() + TIME_OFFSET}`;
   const sig = await sign(params);
-  const res = await fetch(`${BASE_URL()}${path}`, {
+  const res = await fetchWithTimeout(`${BASE_URL()}${path}`, {
     method: 'POST', headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `${params}&signature=${sig}`
-  });
+  }, 8000);
   if (!res.ok) { const e = await res.json(); throw new Error(e.msg || res.status); }
   return res.json();
 }
 
 async function placeProtectionOrder(symbol, side, type, stopPrice) {
   const path = '/fapi/v1/order';
-  const params = `symbol=${symbol}&side=${side}&type=${type}&stopPrice=${stopPrice}&closePosition=true&timestamp=${Date.now()}`;
+  const params = `symbol=${symbol}&side=${side}&type=${type}&stopPrice=${stopPrice}&closePosition=true&timestamp=${Date.now() + TIME_OFFSET}`;
   const sig = await sign(params);
-  const res = await fetch(`${BASE_URL()}${path}`, {
+  const res = await fetchWithTimeout(`${BASE_URL()}${path}`, {
     method: 'POST', headers: { 'X-MBX-APIKEY': API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `${params}&signature=${sig}`
-  });
+  }, 8000);
   if (!res.ok) { log(`Protection order ${type} error`, await res.json()); }
 }
 
 async function cancelAllOpenOrders(symbol) {
   const path = '/fapi/v1/allOpenOrders';
-  const params = `symbol=${symbol}&timestamp=${Date.now()}`;
+  const params = `symbol=${symbol}&timestamp=${Date.now() + TIME_OFFSET}`;
   const sig = await sign(params);
-  await fetch(`${BASE_URL()}${path}?${params}&signature=${sig}`, {
+  await fetchWithTimeout(`${BASE_URL()}${path}?${params}&signature=${sig}`, {
     method: 'DELETE', headers: { 'X-MBX-APIKEY': API_KEY }
-  });
+  }, 7000);
 }
+
 
 /* ── HMAC-SHA256 Signature ──────────────────────────────── */
 async function sign(message) {
@@ -795,7 +1017,32 @@ function strToBytes(str) {
   return new TextEncoder().encode(str);
 }
 
+/* ── Fetch with Timeout ────────────────────────────────── */
+async function fetchWithTimeout(resource, options = {}, timeout = 6000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  const response = await fetch(resource, {
+    ...options,
+    signal: controller.signal
+  });
+  clearTimeout(id);
+  return response;
+}
+
 /* ── Broadcast helpers ──────────────────────────────────── */
+function broadcastStatus(running, customMsg = null) {
+  const statusText = customMsg || (running ? 'Bot Online' : 'Bot Offline');
+  chrome.runtime.sendMessage({ 
+    action: 'BOT_STATUS', 
+    running, 
+    strategy: STRATEGY,
+    statusText,
+    lastScan: Date.now()
+  }).catch(() => {});
+  // Push small log for the dashboard sidebar
+  chrome.runtime.sendMessage({ action: 'DIAG_LOG', text: statusText }).catch(() => {});
+}
+
 async function broadcastPositionUpdate(pos) {
   try { await chrome.runtime.sendMessage({ action: 'POSITION_UPDATE', position: pos }); } catch (_) {}
 }
@@ -816,16 +1063,45 @@ function log(msg, detail = '') {
 
 /* ── Alarm fallback (keep SW alive) ─────────────────────── */
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'bot-tick' && BOT_RUNNING) await runCycle();
+  if (alarm.name === 'bot-tick') {
+     const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy', 'savedSettings']);
+     if (data.botRunning) {
+        BOT_RUNNING = true;
+        STRATEGY = data.selectedStrategy || STRATEGY;
+        TRADE_SETTINGS = data.savedSettings || TRADE_SETTINGS;
+        await loadKeys();
+        if (TIME_OFFSET === 0) await syncWithBinanceTime();
+        await runCycle();
+     }
+  }
 });
 chrome.alarms.create('bot-tick', { periodInMinutes: 1 });
 
 /* ── On SW startup: restore state ───────────────────────── */
 chrome.runtime.onStartup.addListener(async () => {
-  const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy']);
+  const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy', 'savedSettings']);
   if (data.botRunning) {
     await loadKeys();
     STRATEGY = data.selectedStrategy || 'RSI+EMA';
+    TRADE_SETTINGS = data.savedSettings || {};
+    await syncWithBinanceTime();
     await startBot();
   }
 });
+
+/* ── Sync with Binance Time ─────────────────────────────── */
+async function syncWithBinanceTime() {
+  try {
+    const start = Date.now();
+    const res = await fetch(`${BASE_URL()}/fapi/v1/time`);
+    const json = await res.json();
+    const end = Date.now();
+    const serverTime = json.serverTime;
+    // Calculate offset: ServerTime - LocalTime (using average latency)
+    const latency = (end - start) / 2;
+    TIME_OFFSET = serverTime - (start + latency);
+    log(`🕒 Time Synced. Offset: ${TIME_OFFSET}ms`);
+  } catch (e) {
+    log('⚠️ Time Sync Failed:', e.message);
+  }
+}

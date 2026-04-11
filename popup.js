@@ -93,9 +93,19 @@ async function toggleBot() {
 
   // Save state & notify background worker
   await chrome.storage.local.set({ botRunning, selectedStrategy });
+
+  // Load saved settings from dashboard (so mode/amount/leverage are correct)
+  const settingsData = await chrome.storage.local.get(['savedSettings']);
+  const settings = settingsData.savedSettings || {
+    symbol: 'BTCUSDT', amount: '50', risk: '2', leverage: '5',
+    stopLoss: '1.5', takeProfit: '3', trailingSl: '0',
+    autoCompound: false, dailyTarget: '20', autoSwitch: false, mode: 'paper'
+  };
+
   chrome.runtime.sendMessage({
     action: botRunning ? 'START_BOT' : 'STOP_BOT',
-    strategy: selectedStrategy
+    strategy: selectedStrategy,
+    settings
   });
 }
 
@@ -125,7 +135,14 @@ function selectStrategy(el, strategy) {
   document.querySelectorAll('.strategy-card').forEach(c => c.classList.remove('active-strategy'));
   el.classList.add('active-strategy');
   selectedStrategy = strategy;
-  chrome.storage.local.set({ selectedStrategy });
+  
+  // Wipe and set to avoid conflicts
+  chrome.storage.local.remove(['selectedStrategy'], () => {
+     chrome.storage.local.set({ selectedStrategy });
+  });
+
+  // Tell background immediately
+  chrome.runtime.sendMessage({ action: 'UPDATE_STRATEGY', strategy });
 }
 
 // ── Open full-screen dashboard ───────────────────────────
