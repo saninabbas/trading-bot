@@ -1,0 +1,11 @@
+{
+  "name": "futures-ai-bot",
+  "version": "3.0.0",
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^7.0.3",
+    "axios": "^1.3.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3"
+  }
+}
