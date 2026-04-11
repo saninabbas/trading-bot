@@ -8,7 +8,7 @@
     "https://api.binance.com/*",
     "https://fapi.binance.com/*",
     "https://testnet.binancefuture.com/*",
-    "https://api.x.ai/*"
+    "https://generativelanguage.googleapis.com/*"
   ],
   "background": { "service_worker": "background.js" },
   "action": {

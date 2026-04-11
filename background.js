@@ -316,15 +316,18 @@ async function runStrategy() {
 
       // ── Gemini AI Signal Filter ───────────────────────────
       if (GEMINI_KEY) {
-        broadcastLog(`🤖 Asking Gemini AI to confirm signal...`);
+        log('🤖 Asking Gemini AI to confirm signal using Technicals + News + 24h Trend...', `${direction} ${symbol}`);
         const rsi = (() => { const r = calcRSI(closes, 14); return r ? r[r.length-1].toFixed(2) : 'N/A'; })();
         const ema50 = (() => { const e = calcEMA(closes, 50); return e ? e[e.length-1].toFixed(2) : 'N/A'; })();
-        const confirmed = await geminiConfirmSignal(symbol, direction, price, rsi, ema50, STRATEGY);
-        if (!confirmed) {
-          broadcastLog(`🤖 Gemini: Signal SKIPPED (low confidence)`);
+        
+        const news  = await getLatestNews();
+        const trend = await get24hStats(symbol);
+        
+        const ok = await geminiConfirmSignal(symbol, direction, price, rsi, ema50, STRATEGY, news, trend);
+        if (!ok) {
+          log('🤖 Gemini AI SKIPPED the signal due to market context.');
           return;
         }
-        broadcastLog(`🤖 Gemini: Signal CONFIRMED ✅`);
       }
       // ─────────────────────────────────────────────────────
 
@@ -418,13 +421,14 @@ async function openTrade(symbol, direction, currentPrice) {
   const leverage  = parseInt(s.leverage  || 10);
   const slPct     = parseFloat(s.stopLoss  || 1.5) / 100;
   const tpPct     = parseFloat(s.takeProfit|| 3.0) / 100;
-  const riskPct   = Math.min(parseFloat(s.risk || 2), 2) / 100; // Hard cap at 2%
-  const mode      = s.mode || 'paper';
+  const accountBalance = parseFloat(bal) || parseFloat(s.amount || 100);
+  
+  // Logic: Use 50% of the total investment/balance as MARGIN for the trade
+  const marginToUse = accountBalance * 0.50; 
+  const rawQty     = (marginToUse * leverage) / currentPrice;
 
-  const accountBalance = parseFloat(bal) || 100;
-  const riskAmount     = accountBalance * riskPct;
-  const slDistance     = currentPrice * slPct;
-  const rawQty         = (riskAmount * leverage) / currentPrice;
+  const mode      = s.mode || 'paper';
+  const slDistance = currentPrice * slPct;
 
   let sl, tp;
   if (direction === 'LONG') {
@@ -575,6 +579,36 @@ async function closeTrade(exitPrice, reason) {
 /* ══════════════════════════════════════════════════════════
    BINANCE API HELPERS
 ══════════════════════════════════════════════════════════ */
+/* ── Helper: 24h Trend Analysis ───────────────────────── */
+async function get24hStats(symbol) {
+  try {
+    const res  = await fetchWT(`${BASE_URL()}/fapi/v1/ticker/24hr?symbol=${symbol.toUpperCase()}`);
+    const data = await res.json();
+    return {
+      priceChange: parseFloat(data.priceChangePercent).toFixed(2),
+      volume: parseFloat(data.volume).toFixed(0),
+      high: parseFloat(data.highPrice).toFixed(2),
+      low: parseFloat(data.lowPrice).toFixed(2)
+    };
+  } catch (e) {
+    log('24h stats failed', e.message);
+    return { priceChange: '0.00', volume: '0' };
+  }
+}
+
+/* ── Helper: News Aggregator (No API Key Required) ────── */
+async function getLatestNews() {
+  try {
+    // Using a reliable public crypto news aggregator
+    const res  = await fetchWT('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&limit=10');
+    const data = await res.json();
+    return (data.Data || []).map(n => n.title).slice(0, 8);
+  } catch (e) {
+    log('News fetch failed', e.message);
+    return ['No recent news available.'];
+  }
+}
+
 async function getBalance() {
   if (!API_KEY || !API_SECRET) return '0';
   const path   = '/fapi/v2/balance';
@@ -797,113 +831,101 @@ function log(msg, detail = '') {
   console.log(`[FUTURES-AI] ${msg}`, detail);
   broadcastLog(`${msg} ${detail}`);
 }
-
 /* ══════════════════════════════════════════════════════════
-   GROK AI (xAI) — Signal Filter + Chatbot
+   GEMINI AI — Signal Filter + Chatbot
 ══════════════════════════════════════════════════════════ */
 
-const GROK_MODEL = 'grok-3-fast';
-const GROK_URL   = 'https://api.x.ai/v1/chat/completions';
+const GEMINI_MODEL = 'gemini-1.5-flash';
 
-/* ── Helper: Call Grok API ─────────────────────────────── */
-async function callGrok(systemPrompt, userMessage, maxTokens = 200, temp = 0.3) {
-  if (!GEMINI_KEY) return null;
-
-  const res = await fetchWT(GROK_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GEMINI_KEY}`
-    },
-    body: JSON.stringify({
-      model: GROK_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userMessage }
-      ],
-      temperature: temp,
-      max_tokens: maxTokens
-    })
-  }, 15000);
-
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message || 'Grok API error');
-  return data.choices?.[0]?.message?.content || '';
-}
-
-/* ── Grok Signal Confirmation (called before every trade) ── */
-async function geminiConfirmSignal(symbol, direction, price, rsi, ema50, strategy) {
+/* ── Gemini Signal Confirmation (called before every trade) ── */
+async function geminiConfirmSignal(symbol, direction, price, rsi, ema50, strategy, news, trend) {
   if (!GEMINI_KEY) return true; // No key → skip filter, allow trade
 
-  const system = `You are a professional crypto futures analyst. Respond with ONLY a JSON object, no extra text.`;
+  const prompt = `You are a Professional Crypto Futures Trader and Analyst.
+A trading signal was generated:
+- Signal: ${direction.toUpperCase()}
+- Symbol: ${symbol}
+- Current Price: $${price.toFixed(2)}
+- Strategy: ${strategy}
 
-  const user = `A trading bot generated a ${direction} signal on ${symbol} using the ${strategy} strategy.
+MARKET CONTEXT:
+- 24h Trend: ${trend.priceChange}% change today | Volume: ${trend.volume}
+- Latest News: ${news.join(' | ')}
 
-Current data:
-- Price: $${price.toFixed(2)}
-- RSI(14): ${rsi}
-- EMA(50): $${ema50}
+TECHNICALS:
+- RSI (14): ${rsi}
+- EMA (50): $${ema50}
 
-Should this trade be executed? Consider momentum and whether the signal makes technical sense.
-Respond: {"action": "CONFIRM"} or {"action": "SKIP", "reason": "one sentence"}`;
+GOAL: Filter out false signals. High volatility news or counter-trend 24h moves should cause a SKIP.
+Respond with ONLY a valid JSON object:
+{"action": "CONFIRM"} or {"action": "SKIP", "reason": "one short sentence"}`;
 
   try {
-    const rawText = await callGrok(system, user, 80, 0.1);
-    if (!rawText) return true;
+    const res = await fetchWT(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 100 }
+        })
+      }, 15000
+    );
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
 
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
     if (!jsonMatch) return true;
 
     const parsed = JSON.parse(jsonMatch[0]);
     if (parsed.action === 'SKIP') {
-      log('🤖 Grok skip reason:', parsed.reason || 'low confidence');
+      log('🤖 Gemini AI skip reason:', parsed.reason || 'Not confirmed by market context');
       return false;
     }
     return true;
   } catch (e) {
-    log('Grok filter exception', e.message);
-    return true; // Fail-safe: allow trade on error
+    log('Gemini filter error', e.message);
+    return true; // Fail-safe: allow on error
   }
 }
 
-/* ── Grok AI Chatbot ──────────────────────────────────────── */
+/* ── Gemini AI Chatbot ──────────────────────────────────────── */
 async function handleChatQuery(query) {
-  if (!GEMINI_KEY) return '⚠️ Please save your Grok API Key in Settings → API Keys tab first.';
+  if (!GEMINI_KEY) return '⚠️ Please save your Gemini API Key in Settings first.';
 
-  // Gather live market context
   let context = 'Market context unavailable.';
   try {
     const symbol  = (TRADE_SETTINGS.symbol || 'BTCUSDT').toUpperCase();
-    const price   = await getTickerPrice(symbol);
-    const candles = await getCandles(symbol, '15m', 50);
-    const closes  = candles.map(c => parseFloat(c[4]));
-    const rsiArr  = calcRSI(closes, 14);
-    const rsi     = rsiArr ? rsiArr[rsiArr.length - 1].toFixed(2) : 'N/A';
-    const ema50Arr = calcEMA(closes, 50);
-    const ema50   = ema50Arr ? ema50Arr[ema50Arr.length - 1].toFixed(2) : 'N/A';
+    const priceSrc   = await getTickerPrice(symbol);
+    const trendSrc   = await get24hStats(symbol);
+    const newsSrc    = await getLatestNews();
+    
+    context = `[${symbol}] Price: $${priceSrc.toFixed(2)} | 24h Change: ${trendSrc.priceChange}% | Volume: ${trendSrc.volume} | News: ${newsSrc[0]}`;
+  } catch (e) {}
 
-    const trade = ACTIVE_TRADE
-      ? `Active Trade: ${ACTIVE_TRADE.direction} ${ACTIVE_TRADE.symbol} @ $${ACTIVE_TRADE.entry} | P&L: ${ACTIVE_TRADE.pnl?.toFixed(4) || '0'} USDT`
-      : 'No active trade.';
-
-    context = `Symbol: ${symbol} | Price: $${price.toFixed(2)} | RSI(14): ${rsi} | EMA50: $${ema50} | Strategy: ${STRATEGY} | ${trade}`;
-  } catch (e) {
-    log('Chat context error', e.message);
-  }
-
-  const system = `You are FUTURES AI Oracle — a sharp, professional crypto trading assistant embedded in a Binance Futures bot. Be concise and helpful. Use short responses under 150 words.
-
-LIVE CONTEXT: ${context}
-
-RULES:
-- If the user asks to LONG/SHORT a coin, reply with: <EXECUTE>{"action":"LONG","symbol":"BTCUSDT"}</EXECUTE> followed by a confirmation.
-- For any other question, give a professional answer based on the market context.`;
+  const prompt = `You are FUTURES AI Oracle. Be concise, professional, and sharp. 
+Context: ${context}
+If the user asks to LONG/SHORT, reply: <EXECUTE>{"action":"LONG","symbol":"BTCUSDT"}</EXECUTE> followed by message.
+User: "${query}"`;
 
   try {
-    let reply = await callGrok(system, query, 300, 0.3);
-    if (!reply) return 'No response from Oracle.';
+    const res = await fetchWT(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 300 }
+        })
+      }, 15000
+    );
+    const data = await res.json();
+    if (data.error) return '❌ API Error: ' + data.error.message;
 
-    // Check for trade execution tag
+    let reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
     const execMatch = reply.match(/<EXECUTE>([\s\S]*?)<\/EXECUTE>/);
     if (execMatch) {
       try {
@@ -912,15 +934,12 @@ RULES:
           reply = reply.replace(execMatch[0], '').trim();
           setTimeout(async () => {
             const p = await getTickerPrice(cmd.symbol);
-            broadcastLog(`🤖 Grok executing ${cmd.action} on ${cmd.symbol}...`);
-            await openTrade(cmd.symbol, cmd.action, p);
+            broadcastLog(`🤖 Oracle executing ${cmd.action} on ${cmd.symbol}...`);
+            openTrade(cmd.symbol, cmd.action, p);
           }, 300);
         }
-      } catch (e) { log('Chat trade parse error', e.message); }
+      } catch (e) {}
     }
-
     return reply;
-  } catch (e) {
-    return '⚠️ Oracle offline: ' + e.message;
-  }
+  } catch (e) { return '⚠️ Oracle error: ' + e.message; }
 }

@@ -238,7 +238,7 @@ async function saveApiKeys() {
 
   await chrome.storage.local.set({ apiKey, apiSecret, useTestnet, geminiKey });
   await sendMsg({ action: 'UPDATE_KEYS', apiKey, apiSecret, useTestnet });
-  showResult('api', '✅ API Keys saved!' + (geminiKey ? ' Grok AI enabled ✅' : ' (No Grok key — AI features disabled)'), 'ok');
+  showResult('api', '✅ API Keys saved!' + (geminiKey ? ' Gemini AI enabled ✅' : ' (No Gemini key — AI features disabled)'), 'ok');
 }
 
 async function testConnection() {
