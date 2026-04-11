@@ -45,10 +45,10 @@ document.addEventListener('DOMContentLoaded', () => {
         verifyBtn.textContent = '🔍 Checking Blockchain...';
         
         try {
-            // Replace with your Render URL after deployment
-            const RENDER_URL = 'https://your-bot-backend.onrender.com'; 
+            // Your NEW Vercel URL from the dashboard
+            const VERCEL_URL = 'https://trading-bot-liart.vercel.app'; 
             
-            const res = await fetch(`${RENDER_URL}/api/verify-payment`, {
+            const res = await fetch(`${VERCEL_URL}/api/verify-payment`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ txHash })

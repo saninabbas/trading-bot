@@ -952,13 +952,36 @@ function isSubscriptionActive() {
   return isTrialActive();
 }
 
+async function verifyLicenseOnline(key, deviceId) {
+  try {
+    const VERCEL_URL = 'https://trading-bot-liart.vercel.app'; 
+    const r = await fetch(`${VERCEL_URL}/api/validate-license`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key, deviceId })
+    });
+    const data = await r.json();
+    return data;
+  } catch (e) {
+    return { valid: false, msg: "License Server unreachable." };
+  }
+}
+
 async function validateLicenseKey(key) {
   if (!key) return false;
-  const k = key.trim().toUpperCase();
-  if (!k.startsWith('FUTURES-AI-PRO-')) return false;
-  const providedHash = k.replace('FUTURES-AI-PRO-', '');
-  const expected     = await hwHash(DEVICE_ID);
-  return providedHash.includes(expected);
+  
+  // 1. Trial Check (Local)
+  if (isTrialActive()) return true;
+
+  // 2. Online Pro Check (Vercel)
+  const res = await verifyLicenseOnline(key, DEVICE_ID);
+  if (res.valid) {
+    log('✅ PRO license verified online.');
+    return true;
+  } else {
+    log('❌ License invalid:', res.msg);
+    return false;
+  }
 }
 
 async function hwHash(devId) {
