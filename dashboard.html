@@ -3,449 +3,215 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Futures Bot — Dashboard</title>
+  <title>FUTURES AI – Dashboard</title>
   <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
 
-<div class="dashboard-layout">
-
-  <!-- ══ SIDEBAR ══ -->
+  <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="sidebar-logo">
-        <div style="display:flex; align-items:center; gap:12px">
-          <img src="icon.png" style="width:40px;height:40px;border-radius:10px;border:1px solid var(--border)" alt="logo">
-          <div>
-            <h1 style="font-size:16px;line-height:1;margin-bottom:2px">FUTURES AI <span id="heartbeat-pulse" class="pulse-icon" style="display:none">●</span></h1>
-            <p style="font-size:9px;color:var(--muted);letter-spacing:1px">PRO TRADER EDITION</p>
-          </div>
-        </div>
+      <img src="icon.png" alt="logo">
+      <div>
+        <div class="sbl-title">FUTURES AI</div>
+        <div class="sbl-sub">PRO EDITION</div>
+      </div>
     </div>
-    <nav class="nav-links">
-      <div class="nav-link active" data-page="overview">
-        <span class="nav-icon">📊</span> Overview
-      </div>
-      <div class="nav-link" data-page="trades">
-        <span class="nav-icon">📋</span> Trade Log
-      </div>
-      <div class="nav-link" data-page="settings">
-        <span class="nav-icon">⚙️</span> Settings
-      </div>
-      <div class="nav-link" data-page="subscription">
-        <span class="nav-icon">💎</span> Subscription
-      </div>
+    <nav class="sidebar-nav">
+      <a class="nav-item active" data-tab="overview"  href="#">📊 Overview</a>
+      <a class="nav-item"        data-tab="settings"  href="#">⚙️ Settings</a>
+      <a class="nav-item"        data-tab="history"   href="#">📋 Trade History</a>
+      <a class="nav-item"        data-tab="license"   href="#">🔑 License</a>
     </nav>
-    <div class="sidebar-spacer"></div>
-      <div class="sidebar-bottom">
-        <!-- Trial Status -->
-        <div id="trial-badge" style="display:none; margin-bottom:12px; padding:10px; background:rgba(0,255,255,0.05); border:1px solid rgba(0,255,255,0.1); border-radius:8px">
-          <div style="font-size:10px; color:var(--muted); text-transform:uppercase">Free Trial</div>
-          <div id="trial-timer" style="font-size:14px; font-weight:700; color:var(--cyan)">60:00 left</div>
-        </div>
-
-        <div class="bot-run-status">
-           <div id="sb-dot" class="dot-sm off"></div>
-           <div>
-             <div style="font-size:11px;font-weight:700" id="sb-status">Bot Offline</div>
-             <div style="font-size:10px;color:var(--muted)" id="sb-strategy">No strategy</div>
-             <div id="sb-last-check" style="font-size:9px;color:var(--cyan);opacity:0.8;margin-top:2px;display:none">● Alive</div>
-           </div>
-        </div>
-      </div>
+    <div class="sidebar-health" id="health-panel">
+      <div class="health-row"><span class="h-label">API</span><span id="h-api" class="h-val bad">–</span></div>
+      <div class="health-row"><span class="h-label">Mode</span><span id="h-mode" class="h-val">–</span></div>
+      <div class="health-row"><span class="h-label">Bot</span><span id="h-bot" class="h-val bad">STOPPED</span></div>
+      <div class="health-row"><span class="h-label">License</span><span id="h-license" class="h-val">–</span></div>
+    </div>
   </aside>
 
-  <!-- ══ MAIN ══ -->
-  <div class="main-content">
+  <!-- MAIN -->
+  <main class="main-content">
 
-    <!-- TOPBAR -->
-    <header class="topbar">
-      <div class="topbar-left">
-        <h2 id="page-title">Overview</h2>
-        <p id="page-subtitle">Live trading dashboard</p>
-      </div>
-      <div class="topbar-right">
-        <div class="badge-live">
-          <div class="dot-sm on"></div>
-          BINANCE FUTURES
-        </div>
-        <div id="db-time" style="font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace"></div>
-      </div>
-    </header>
-
-    <!-- ══ PAGE: OVERVIEW ══ -->
-    <div class="page active" id="page-overview">
-
-      <!-- Bot Control Bar (Integrated) -->
-      <div class="bot-control-bar">
-        <div class="big-status">
-          <div id="big-dot" class="dot-lg off"></div>
-          <div>
-            <div class="status-big" id="big-status-text">BOT OFFLINE</div>
-            <div style="font-size:12px;color:var(--muted)" id="big-strategy-text">Select a strategy to begin</div>
-          </div>
-        </div>
-        <button id="big-start-btn" class="btn-start-big">
-          ▶ START BOT ⚡
-        </button>
+    <!-- ══════════════ OVERVIEW TAB ══════════════ -->
+    <div class="tab-pane active" id="tab-overview">
+      <div class="page-header">
+        <h2 class="page-title">📊 Live Overview</h2>
+        <button id="refresh-btn" class="btn-ghost">🔄 Refresh</button>
       </div>
 
-      <!-- Stat Cards -->
-      <div class="stat-grid">
-        <div class="stat-card green-glow">
-          <div class="stat-card-label">TOTAL BALANCE</div>
-          <div class="stat-card-value green-val" id="d-balance">0.00</div>
-          <div class="stat-card-sub" style="color:var(--muted)">USDT</div>
+      <!-- Metric Cards -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">BALANCE</div>
+          <div id="ov-balance" class="metric-value green">– USDT</div>
         </div>
-        <div class="stat-card cyan-glow">
-          <div class="stat-card-label">TODAY P&amp;L</div>
-          <div class="stat-card-value cyan-val" id="d-pnl">+0.00</div>
-          <div class="stat-card-sub up" id="d-pnl-pct">+0.00%</div>
+        <div class="metric-card">
+          <div class="metric-label">TODAY P&amp;L</div>
+          <div id="ov-pnl" class="metric-value">$0.00</div>
         </div>
-        <div class="stat-card amber-glow">
-          <div class="stat-card-label">WIN RATE</div>
-          <div class="stat-card-value amber-val" id="d-winrate">—</div>
-          <div class="stat-card-sub" style="color:var(--muted)" id="d-winrate-sub">0W / 0L</div>
+        <div class="metric-card">
+          <div class="metric-label">WIN RATE</div>
+          <div id="ov-winrate" class="metric-value cyan">–</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-card-label">TOTAL TRADES</div>
-          <div class="stat-card-value" id="d-total-trades">0</div>
-          <div class="stat-card-sub" style="color:var(--muted)" id="d-active-sub">0 active</div>
-        </div>
-      </div>
-
-      <!-- Strategy Selection -->
-      <div class="strategy-section">
-        <div class="section-title">📈 SELECT STRATEGY</div>
-        <div class="strategy-big-grid">
-          <div class="strategy-big-card sel-rsi" data-strat="RSI+EMA">
-            <div class="strat-em">📈</div>
-            <div class="strat-name">RSI + EMA</div>
-            <div class="strat-desc">RSI(14) overbought/oversold with EMA(21) trend filter</div>
-            <div class="strat-badge badge-g">MOMENTUM</div>
-          </div>
-          <div class="strategy-big-card" data-strat="MACD">
-            <div class="strat-em">📊</div>
-            <div class="strat-name">MACD</div>
-            <div class="strat-desc">MACD crossover signals for trending markets</div>
-            <div class="strat-badge badge-c">TREND</div>
-          </div>
-          <div class="strategy-big-card" data-strat="Scalping">
-            <div class="strat-em">⚡</div>
-            <div class="strat-name">Scalping</div>
-            <div class="strat-desc">9/21 EMA crossover on fast timeframes</div>
-            <div class="strat-badge badge-p">FAST</div>
-          </div>
-          <div class="strategy-big-card" data-strat="Deep AI">
-            <div class="strat-em">🧠</div>
-            <div class="strat-name">Deep AI</div>
-            <div class="strat-desc">Gemini AI analyzes market + news for smart decisions</div>
-            <div class="strat-badge badge-a" style="background:rgba(217, 70, 239, 0.15); color:#d946ef;">GOD MODE</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Trade Settings -->
-      <div class="controls-grid">
-        <div class="control-card">
-          <div class="control-title">⚙️ TRADE SETTINGS</div>
-          <div class="form-group">
-            <label class="form-label">Symbol</label>
-            <select id="d-symbol" class="form-select">
-              <option>BTCUSDT</option>
-              <option>ETHUSDT</option>
-              <option>BNBUSDT</option>
-              <option>SOLUSDT</option>
-              <option>XRPUSDT</option>
-              <option>DOGEUSDT</option>
-              <option>AVAXUSDT</option>
-              <option>LTCUSDT</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Trade Amount (USDT)</label>
-            <input type="number" id="d-amount" class="form-input" value="50" min="5">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Mode</label>
-            <select id="d-mode" class="form-select">
-              <option value="paper">📄 Paper Trading (Safe)</option>
-              <option value="live">🔴 Live Trading (Real Money)</option>
-            </select>
-          </div>
-          <div class="form-group" style="flex-direction:row; justify-content:space-between; align-items:center; margin-top:10px">
-            <label class="form-label" style="margin-bottom:0">Risk 50% of Balance</label>
-            <input type="checkbox" id="d-auto-risk" style="width:20px; height:20px; cursor:pointer" checked>
-          </div>
-        </div>
-
-        <div class="control-card">
-          <div class="control-title">🎯 RISK MANAGEMENT</div>
-          <div class="lever-display" id="lever-val">20x</div>
-          <input type="range" id="lever-range" min="1" max="20" value="20">
-          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px">
-            <span>1x (Safe)</span><span>20x (Max)</span>
-          </div>
-          <div class="form-group" style="margin-top:16px">
-            <label class="form-label">Stop Loss %</label>
-            <input type="number" id="d-sl" class="form-input" value="0.5" step="0.1" min="0.1">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Take Profit %</label>
-            <input type="number" id="d-tp" class="form-input" value="1.0" step="0.1" min="0.1">
-          </div>
+        <div class="metric-card">
+          <div class="metric-label">TOTAL TRADES</div>
+          <div id="ov-total" class="metric-value">0</div>
         </div>
       </div>
 
       <!-- Active Position -->
-      <div id="active-position-wrap" style="display:none; margin-bottom: 24px;">
-        <div class="active-card">
-          <div class="active-header">
-            <div class="active-title">
-              <span id="ap-badge" class="pos-badge">LONG</span>
-              <span id="ap-symbol">BTCUSDT</span>
-              <span class="active-live-indicator">● LIVE</span>
-            </div>
-            <button id="close-pos-btn">✖ CLOSE POSITION</button>
-          </div>
-          <div class="active-body">
-            <div class="active-stat">
-              <span class="as-label">Entry Price</span>
-              <span class="as-value" id="ap-entry">0.00</span>
-            </div>
-            <div class="active-stat">
-              <span class="as-label">Mark Price</span>
-              <span class="as-value" id="ap-mark">0.00</span>
-            </div>
-            <div class="active-stat">
-              <span class="as-label">Stop Loss</span>
-              <span class="as-value red-text" id="ap-sl">0.00</span>
-            </div>
-            <div class="active-stat">
-              <span class="as-label">Take Profit</span>
-              <span class="as-value green-text" id="ap-tp">0.00</span>
-            </div>
-            <div class="active-stat">
-              <span class="as-label">Initial Margin ($)</span>
-              <span class="as-value cyan-text" style="font-weight:700" id="ap-amount">0.00</span>
-            </div>
-          </div>
-          <div class="active-footer" style="display:flex; justify-content:space-between; align-items:center;">
-             <div class="target-line" style="font-size: 13px; color: var(--muted); font-weight: 700;">UNREALIZED PROFIT</div>
-             <div style="text-align:right">
-               <div id="ap-pnl" style="font-size:28px; font-weight:800; font-family:'JetBrains Mono',monospace;">$0.00</div>
-               <div id="ap-pnl-pct" style="font-size:14px; font-weight:700;">+0.00%</div>
-             </div>
-          </div>
+      <div class="section-card">
+        <div class="section-title">Active Position</div>
+        <div id="position-panel">
+          <div class="no-trade">No open position</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button id="close-pos-btn" class="btn-danger" style="display:none">⛔ Close Position</button>
+          <button id="force-clear-btn" class="btn-ghost-sm">🗑 Force Clear</button>
         </div>
       </div>
 
-      <!-- Trade Log Preview -->
-      <div class="trade-log">
-        <div class="trade-log-header">
-          <h3>📋 Recent Trades</h3>
-          <button class="clear-btn" id="mini-clear-log-btn">Clear Log</button>
-        </div>
-        <div class="log-list" id="log-list">
-          <div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">
-            No trades yet. Start the bot to begin trading.
-          </div>
-        </div>
-      </div>
-    </div> <!-- END PAGE: OVERVIEW -->
-
-    <!-- ══ PAGE: TRADES ══ -->
-    <div class="page" id="page-trades">
-      <div class="log-full">
-        <div class="log-toolbar">
-          <button class="filter-btn active" data-filter="all">All</button>
-          <button class="filter-btn" data-filter="LONG">LONG</button>
-          <button class="filter-btn" data-filter="SHORT">SHORT</button>
-          <button class="filter-btn" data-filter="win">Wins</button>
-          <button class="filter-btn" data-filter="loss">Losses</button>
-          <button class="clear-btn" id="full-clear-log-btn" style="margin-left:auto">Clear All</button>
-        </div>
-        <table class="log-table">
-          <thead>
-            <tr>
-              <th>TYPE</th>
-              <th>SYMBOL</th>
-              <th>ENTRY</th>
-              <th>EXIT</th>
-              <th>P&amp;L</th>
-              <th>STRATEGY</th>
-              <th>TIME</th>
-            </tr>
-          </thead>
-          <tbody id="full-log-body">
-            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">No trades yet.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ══ PAGE: SETTINGS ══ -->
-    <div class="page" id="page-settings">
-      <div class="settings-grid">
-        <div class="settings-card">
-          <div class="settings-title"><span>🔑</span> API Configuration</div>
-          <div class="input-group">
-            <label class="input-label">API KEY</label>
-            <div class="input-wrap">
-              <input type="password" id="api-key" class="settings-input" placeholder="Enter your Binance API Key">
-              <button class="eye-btn" data-target="api-key">👁</button>
-            </div>
-          </div>
-          <div class="input-group">
-            <label class="input-label">SECRET KEY</label>
-            <div class="input-wrap">
-              <input type="password" id="api-secret" class="settings-input" placeholder="Enter your Binance Secret Key">
-              <button class="eye-btn" data-target="api-secret">👁</button>
-            </div>
-          </div>
-          <div class="input-group">
-            <label class="input-label">TESTNET MODE</label>
-            <select id="use-testnet" class="settings-input" style="font-family:'Inter',sans-serif">
-              <option value="true">✅ Yes — Use Testnet (Recommended)</option>
-              <option value="false">⚠️ No — Real Money</option>
-            </select>
-          </div>
-          
-          <div class="settings-title" style="margin-top:24px;"><span>🧠</span> AI Engine</div>
-          <div class="input-group">
-            <label class="input-label">GEMINI AI API KEY (For Deep AI Strategy)</label>
-            <div class="input-wrap">
-              <input type="password" id="gemini-key" class="settings-input" placeholder="Get free key at aistudio.google.com">
-              <button class="eye-btn" data-target="gemini-key">👁</button>
-            </div>
-          </div>
-          <button id="save-api-btn" class="save-btn">💾 SAVE API KEYS</button>
-          <div class="warning-box">
-            <strong>⚠️ SECURITY NOTICE</strong><br>
-            Keys are stored locally in Chrome Storage only.<br>
-            Never share your Secret Key. Use <strong>Futures-only</strong> API keys with <strong>no withdrawal</strong> permissions.
-          </div>
-        </div>
-
-        <div class="settings-card">
-          <div class="settings-title"><span>🧪</span> Testnet Setup Guide</div>
-          <div style="font-size:13px;line-height:1.8;color:var(--muted)">
-            <p style="margin-bottom:12px;color:var(--text)">To use paper/testnet mode safely:</p>
-            <ol style="padding-left:16px;display:flex;flex-direction:column;gap:8px">
-              <li>Visit <strong style="color:var(--cyan)">testnet.binancefuture.com</strong></li>
-              <li>Login with GitHub or Google</li>
-              <li>Go to API Management → Create API Key</li>
-              <li>Copy and paste both keys here</li>
-              <li>Enable Testnet Mode above</li>
-              <li>You get <strong style="color:var(--green)">10,000 USDT</strong> test funds</li>
-            </ol>
-          </div>
-          <div class="info-box">
-            ✅ Testnet mode is <strong>100% safe</strong> — no real money at risk.<br>
-            Perfect for testing strategies before going live.
-          </div>
-
-          <div class="settings-title" style="margin-top:24px"><span>📊</span> Connection Status</div>
-          <div id="conn-status" style="font-size:13px;color:var(--muted);margin-top:8px">
-            Not tested yet.
-          </div>
-          <button id="test-conn-btn" class="save-btn" style="margin-top:12px;background:linear-gradient(135deg,var(--cyan),var(--blue))">
-            🔗 TEST CONNECTION
-          </button>
+      <!-- Action Log -->
+      <div class="section-card">
+        <div class="section-title">Action Log</div>
+        <div id="action-log" class="log-box">
+          <div class="log-line muted">Bot not running.</div>
         </div>
       </div>
     </div>
 
-    <!-- ══ PAGE: SUBSCRIPTION ══ -->
-    <div class="page" id="page-subscription">
-      <div class="subscription-container">
-        <div class="sub-header">
-           <div class="sub-icon">💎</div>
-           <h2>FUTURES AI PREMIUM</h2>
-           <p>Unlock permanent access to the world&apos;s most advanced AI trading bot</p>
+    <!-- ══════════════ SETTINGS TAB ══════════════ -->
+    <div class="tab-pane" id="tab-settings">
+      <div class="page-header">
+        <h2 class="page-title">⚙️ Settings</h2>
+      </div>
+
+      <!-- API Keys -->
+      <div class="section-card">
+        <div class="section-title">🔐 Binance API Keys</div>
+        <div class="form-row">
+          <label>API Key</label>
+          <input type="password" id="s-api-key" placeholder="Your Binance Futures API Key">
+        </div>
+        <div class="form-row">
+          <label>API Secret</label>
+          <input type="password" id="s-api-secret" placeholder="Your Binance Futures Secret">
+        </div>
+        <div class="form-row">
+          <label>Mode</label>
+          <select id="s-mode">
+            <option value="paper">📄 Paper Trading (Safe – No Real Money)</option>
+            <option value="live">⚡ Live Trading (Real Money)</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Network</label>
+          <select id="s-testnet">
+            <option value="true">🧪 Testnet (Practice)</option>
+            <option value="false">🌐 Mainnet (Live Binance)</option>
+          </select>
         </div>
 
-        <div class="sub-grid">
-           <!-- Payment Card -->
-           <div class="sub-card payment-card">
-              <div class="card-tag">STEP 1: PAYMENT</div>
-              <h3>Direct USDT Transfer</h3>
-              <p style="font-size:13px; color:var(--muted); margin-bottom:20px">Send payment to the address below to activate your lifetime license.</p>
-              
-              <div class="address-box">
-                <label>USDT ADDRESS (BEP20 / BSC)</label>
-                <div class="copy-wrap">
-                  <input type="text" readonly value="0x9d35215728112c055c8d2472560d7e3ec58df135" id="sub-address">
-                  <button id="copy-addr-btn">COPY</button>
-                </div>
-              </div>
-
-              <div class="sub-price">
-                 <span class="price-val">$10</span>
-                 <span class="price-type">/ 30 DAYS (MONTHLY)</span>
-              </div>
-           </div>
-
-           <!-- Activation Card -->
-           <div class="sub-card activation-card">
-              <div class="card-tag">STEP 2: ACTIVATION</div>
-              <h3>Enter License Key</h3>
-              <p style="font-size:13px; color:var(--muted); margin-bottom:20px">Once you have paid, contact support to receive your unique license key.</p>
-              
-              <div class="input-group">
-                <label class="input-label">YOUR DEVICE ID (Send this to support)</label>
-                <div class="copy-wrap">
-                  <input type="text" readonly id="device-id-field" style="background:rgba(255,255,255,0.05); color:var(--amber); border-color:var(--amber); opacity:0.8">
-                  <button id="copy-device-btn" style="background:var(--amber); color:#000">COPY</button>
-                </div>
-              </div>
-
-              <div class="input-group">
-                <label class="input-label">LICENSE KEY</label>
-                <input type="text" id="license-key-input" class="settings-input" placeholder="FUTURES-AI-PRO-XXXX">
-              </div>
-              
-              <button id="activate-btn" class="save-btn" style="margin-top:12px">🚀 ACTIVATE PERMANENT ACCESS</button>
-
-              <div id="sub-status-msg" style="margin-top:15px; font-size:13px; font-weight:600; text-align:center"></div>
-           </div>
+        <div class="btn-row">
+          <button id="save-api-btn" class="btn-primary">💾 Save Keys</button>
+          <button id="test-api-btn" class="btn-ghost">🔌 Test Connection</button>
         </div>
+        <div id="api-result" class="result-msg"></div>
+      </div>
 
-        <div class="sub-footer">
-           <div class="footer-item">✅ 100% Secure</div>
-           <div class="footer-item">✅ 24/7 Support</div>
-           <div class="footer-item">✅ Lifetime Updates</div>
+      <!-- Trade Settings -->
+      <div class="section-card">
+        <div class="section-title">📐 Trade Settings</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Symbol</label>
+            <input type="text" id="s-symbol" placeholder="BTCUSDT" value="BTCUSDT">
+          </div>
+          <div class="form-row">
+            <label>Leverage (x)</label>
+            <input type="number" id="s-leverage" placeholder="10" min="1" max="125">
+          </div>
+          <div class="form-row">
+            <label>Risk per Trade (%)</label>
+            <input type="number" id="s-risk" placeholder="2" min="0.1" max="2" step="0.1">
+          </div>
+          <div class="form-row">
+            <label>Stop Loss (%)</label>
+            <input type="number" id="s-sl" placeholder="1.5" min="0.5" max="5" step="0.1">
+          </div>
+          <div class="form-row">
+            <label>Take Profit (%)</label>
+            <input type="number" id="s-tp" placeholder="3" min="1" max="20" step="0.1">
+          </div>
+          <div class="form-row">
+            <label>Capital (USDT)</label>
+            <input type="number" id="s-amount" placeholder="50" min="10">
+          </div>
+        </div>
+        <div class="risk-note">⚠️ Max risk is hard-capped at 2% per trade for your safety.</div>
+        <button id="save-settings-btn" class="btn-primary">💾 Save Trade Settings</button>
+        <div id="settings-result" class="result-msg"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════ HISTORY TAB ══════════════ -->
+    <div class="tab-pane" id="tab-history">
+      <div class="page-header">
+        <h2 class="page-title">📋 Trade History</h2>
+        <button id="clear-history-btn" class="btn-ghost">🗑 Clear</button>
+      </div>
+      <div class="section-card">
+        <div id="history-table-wrap">
+          <table class="history-table" id="history-table">
+            <thead>
+              <tr>
+                <th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th>
+                <th>PnL</th><th>Reason</th><th>Mode</th><th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="history-body">
+              <tr><td colspan="8" class="no-data">No trades yet.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
 
-  </div><!-- end main -->
-</div><!-- end layout -->
+    <!-- ══════════════ LICENSE TAB ══════════════ -->
+    <div class="tab-pane" id="tab-license">
+      <div class="page-header">
+        <h2 class="page-title">🔑 License Activation</h2>
+      </div>
+      <div class="section-card">
+        <div class="section-title">Your Device ID</div>
+        <div class="device-id-box">
+          <span id="device-id-text">Loading...</span>
+          <button id="copy-device-btn" class="btn-copy">📋 Copy</button>
+        </div>
+        <p class="muted-note">Send this Device ID to get your unique license key. Each key is locked to one device.</p>
+      </div>
+      <div class="section-card">
+        <div class="section-title">Activate License</div>
+        <div class="form-row">
+          <label>License Key</label>
+          <input type="text" id="license-key-input" placeholder="FUTURES-AI-PRO-XXXXXXXXXXXX" style="text-transform:uppercase">
+        </div>
+        <button id="activate-btn" class="btn-primary">🚀 Activate License</button>
+        <div id="license-result" class="result-msg"></div>
 
-<!-- TOAST -->
-<div id="toast" class="toast">✅ Saved!</div>
-
-<!-- AI CHATBOT UI -->
-<button id="chat-toggle-btn">🤖 Oracle</button>
-<div id="chat-container" class="chat-hidden">
-  <div class="chat-header">
-    <div class="chat-title">
-      <span class="pulse-icon" style="color:var(--cyan); margin-right:8px;">●</span>
-      FUTURES AI ORACLE
+        <div class="license-status-box" id="license-status-box">
+          <div class="ls-row"><span>Status:</span><span id="ls-status">–</span></div>
+          <div class="ls-row"><span>Activation:</span><span id="ls-activated">–</span></div>
+          <div class="ls-row"><span>Expiry:</span><span id="ls-expiry">–</span></div>
+          <div class="ls-row"><span>Days Left:</span><span id="ls-days">–</span></div>
+        </div>
+      </div>
     </div>
-    <button id="chat-close-btn">✖</button>
-  </div>
-  <div class="chat-messages" id="chat-messages">
-    <div class="chat-msg bot">
-      <div class="msg-avatar">🤖</div>
-      <div class="msg-bubble">Hello trader. I am the AI Market Oracle. Ask me for market analysis, news updates, or tell me to execute a trade.</div>
-    </div>
-  </div>
-  <div class="chat-input-area">
-    <input type="text" id="chat-input" placeholder="Ask about BTC, or say 'Long ETH'..." autocomplete="off">
-    <button id="chat-send-btn">➤</button>
-  </div>
-</div>
 
-<script src="dashboard.js"></script>
+  </main>
+
+  <script src="dashboard.js"></script>
 </body>
 </html>

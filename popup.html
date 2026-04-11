@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Futures Bot</title>
+  <title>FUTURES AI – Pro Trader</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -18,21 +18,16 @@
           <p class="brand-sub">PRO TRADER EDITION</p>
         </div>
       </div>
-      <div class="premium-badge" id="premium-badge-btn">⭐ PREMIUM</div>
+      <div id="premium-badge-btn" class="premium-badge">⭐ PRO</div>
     </div>
 
     <!-- BALANCE CARD -->
     <div class="card balance-card">
-      <div class="balance-header">
-        <span class="label">Total Balance</span>
-      </div>
+      <div class="balance-label">TOTAL BALANCE</div>
       <div id="balance" class="balance-amount">0.00 USDT</div>
-      <div class="balance-bar-wrap">
-        <div class="balance-bar" id="balance-bar" style="width:5%"></div>
-      </div>
       <div class="balance-footer">
-        <div>Today's P&amp;L: <span id="today-pl" class="profit">+$0.00</span></div>
-        <div>Active Trades: <span id="active-trades" class="cyan-text">0</span></div>
+        <div>Today's P&L: <span id="today-pl" class="profit">+$0.00</span></div>
+        <div>Trades: <span id="active-trades" class="cyan-text">0</span></div>
       </div>
     </div>
 
@@ -44,23 +39,23 @@
       </div>
       <button id="start-btn" class="start-btn">
         <span id="btn-text">START BOT</span>
-        <span>⚡</span>
+        <span id="btn-icon">⚡</span>
       </button>
     </div>
 
-    <!-- LIVE STATS ROW -->
+    <!-- LIVE STATS -->
     <div class="stats-row">
       <div class="stat-box">
-        <span class="stat-label">Win Rate</span>
+        <span class="stat-label">WIN RATE</span>
         <span id="win-rate" class="stat-value green">—</span>
       </div>
       <div class="stat-box">
-        <span class="stat-label">Total Trades</span>
+        <span class="stat-label">TOTAL TRADES</span>
         <span id="total-trades" class="stat-value cyan">—</span>
       </div>
       <div class="stat-box">
-        <span class="stat-label">Leverage</span>
-        <span id="leverage-display" class="stat-value amber">5x</span>
+        <span class="stat-label">LEVERAGE</span>
+        <span id="leverage-display" class="stat-value amber">10x</span>
       </div>
     </div>
 
@@ -74,32 +69,31 @@
       <div class="strategy-card" data-strategy="MACD">
         <div class="strategy-icon cyan-text">📊</div>
         <div class="strategy-name">MACD</div>
-        <p class="strategy-desc">Trend reversal king</p>
+        <p class="strategy-desc">Trend reversal</p>
       </div>
       <div class="strategy-card" data-strategy="Scalping">
         <div class="strategy-icon purple-text">⚡</div>
         <div class="strategy-name">Scalping</div>
-        <p class="strategy-desc">9/21 EMA lightning</p>
+        <p class="strategy-desc">EMA 9/21 Cross</p>
       </div>
-      <div class="strategy-card" data-strategy="Deep AI">
-        <div class="strategy-icon" style="color:#d946ef">🧠</div>
-        <div class="strategy-name">Deep AI</div>
-        <p class="strategy-desc">Gemini AI + News logic</p>
+      <div class="strategy-card" data-strategy="Breakout">
+        <div class="strategy-icon orange-text">🚀</div>
+        <div class="strategy-name">Breakout</div>
+        <p class="strategy-desc">20-period range</p>
       </div>
     </div>
 
-    <!-- API KEY STATUS -->
+    <!-- API STATUS BAR -->
     <div id="api-status-bar" class="api-status-bar no-api">
-      ⚠️ API Keys not configured — <span id="api-setup-link" class="link-text">Click to Setup</span>
+      ⚠️ API Keys not configured — <span id="api-setup-link" class="link-text">Setup Now</span>
     </div>
 
-    <!-- FULL DASHBOARD BUTTON -->
+    <!-- OPEN DASHBOARD -->
     <button id="full-dashboard-btn" class="dashboard-btn">
-      🌐 OPEN FULL-SCREEN DASHBOARD
-      <span class="dash-icon">📊</span>
+      ⚙️ SETTINGS &amp; LIVE DASHBOARD
     </button>
 
-    <div class="footer-text">100% Secure • No withdrawal keys • Paper mode available</div>
+    <div class="footer-text">Encrypted Keys • No Withdrawal Access • Paper Mode Safe</div>
   </div>
 
   <script src="popup.js"></script>

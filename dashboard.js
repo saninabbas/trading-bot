@@ -1,946 +1,362 @@
-/* ═══════════════════════════════════════════════════════
-   dashboard.js — Clean Dashboard Logic
-   Handles: navigation, API settings, bot control, trade log
-   ═══════════════════════════════════════════════════════ */
+'use strict';
+/* ── FUTURES AI – dashboard.js ────────────────────────────── */
 
-let currentPage    = 'overview';
-let selectedStrat  = 'RSI+EMA';
-let botActive      = false;
-let tradeLog       = [];
-let allTrades      = [];
-let currentFilter  = 'all';
-
-// ── Init ─────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', async () => {
-  initDashListeners();
-  startClock();
-  await loadAllData();
-  startHeartbeatPulse();
-  listenToBackground();
-  await syncActiveTrade();
+/* ── Tab Navigation ─────────────────────────────── */
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', e => {
+    e.preventDefault();
+    const tab = item.dataset.tab;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    item.classList.add('active');
+    document.getElementById(`tab-${tab}`)?.classList.add('active');
+  });
 });
 
-// ── Event Listeners ───────────────────────────────────────
-function initDashListeners() {
-  document.addEventListener('click', (e) => {
-    // 1. Navigation Links
-    const navLink = e.target.closest('.nav-link');
-    if (navLink) { showPage(navLink.dataset.page, navLink); return; }
+/* ── Init ────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadHealth();
+  await loadSettings();
+  await loadOverview();
+  await loadLicenseStatus();
+  await loadTradeHistory();
+  initListeners();
 
-    // 2. Strategy Cards
-    const stratCard = e.target.closest('.strategy-big-card');
-    if (stratCard) {
-      selectBigStrategy(stratCard, stratCard.dataset.strat);
-      stratCard.style.transform = 'scale(0.95)';
-      setTimeout(() => stratCard.style.transform = '', 100);
-      return;
-    }
-
-    // 3. Bot Control
-    if (e.target.id === 'big-start-btn')  { toggleBotDashboard(); return; }
-    if (e.target.id === 'save-api-btn')   { saveApiKeys(); return; }
-    if (e.target.id === 'test-conn-btn')  { testConnection(); return; }
-    if (e.target.id === 'close-pos-btn')  { forceClosePosition(); return; }
-    if (e.target.id === 'activate-btn')   { activateLicense(); return; }
-    if (e.target.id === 'copy-addr-btn')  { copyToClipboard('sub-address', 'Address copied!'); return; }
-    if (e.target.id === 'copy-device-btn') { copyToClipboard('device-id-field', 'ID Copied! Send this to support.'); return; }
-    
-    // Chatbot UI Toggles
-    if (e.target.id === 'chat-toggle-btn') { document.getElementById('chat-container').classList.toggle('chat-hidden'); return; }
-    if (e.target.id === 'chat-close-btn') { document.getElementById('chat-container').classList.add('chat-hidden'); return; }
-    if (e.target.id === 'chat-send-btn')   { handleChatSend(); return; }
-
-    // 4. Filters & Logs
-    const filterBtn = e.target.closest('.filter-btn');
-    if (filterBtn) { filterLog(filterBtn.dataset.filter, filterBtn); return; }
-
-    const clearBtn = e.target.closest('.clear-btn');
-    if (clearBtn && (clearBtn.id === 'mini-clear-log-btn' || clearBtn.id === 'full-clear-log-btn')) {
-      clearLog(); return;
-    }
-
-    // 5. Visibility Toggle (eye buttons)
-    const eyeBtn = e.target.closest('.eye-btn');
-    if (eyeBtn) { toggleVis(eyeBtn.dataset.target, eyeBtn); return; }
-  });
-
-  // Leverage slider
-  const leverRange = document.getElementById('lever-range');
-  if (leverRange) {
-    leverRange.addEventListener('input', function() {
-      updateLeverage(this.value);
-    });
-  }
-
-  // Handle Enter key for Chat Input
-  const chatInput = document.getElementById('chat-input');
-  if (chatInput) {
-    chatInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') handleChatSend();
-    });
-  }
-}
-
-// ── Clock ─────────────────────────────────────────────────
-function startClock() {
-  const el = document.getElementById('db-time');
-  const tick = () => {
-    const now = new Date();
-    el.textContent = now.toUTCString().slice(17, 25) + ' UTC';
-  };
-  tick(); setInterval(tick, 1000);
-}
-
-// ── Load persisted data ───────────────────────────────────
-async function loadAllData() {
-  const data = await chrome.storage.local.get([
-    'botRunning', 'selectedStrategy', 'stats',
-    'tradeLog', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'autoRisk',
-    'licenseKey', 'installTime', 'activationDate'
-  ]);
-
-  if (data.botRunning) {
-    botActive = true;
-    applyBotUI(true);
-  }
-  if (data.selectedStrategy) {
-    selectedStrat = data.selectedStrategy;
-    highlightStrategy(selectedStrat);
-  }
-  if (data.stats) updateDashboardStats(data.stats);
-  if (data.tradeLog) {
-    tradeLog = data.tradeLog;
-    allTrades = [...tradeLog];
-    renderLogList();
-    renderFullLog();
-  }
-  
-  const keyEl = document.getElementById('api-key');
-  const secEl = document.getElementById('api-secret');
-  const geminiEl = document.getElementById('gemini-key');
-  const testnetEl = document.getElementById('use-testnet');
-  const modeEl = document.getElementById('d-mode');
-
-  if (keyEl && data.apiKey) keyEl.value = data.apiKey;
-  if (secEl && data.apiSecret) secEl.value = data.apiSecret;
-  if (geminiEl && data.geminiKey) geminiEl.value = data.geminiKey;
-  
-  if (testnetEl) {
-    testnetEl.value = data.useTestnet !== false ? 'true' : 'false';
-    if (modeEl) {
-      const liveOption = modeEl.options[1];
-      if (data.useTestnet !== false) {
-        liveOption.textContent = '🚀 Live on Testnet (Safe)';
-      } else {
-        liveOption.textContent = '🔴 Live Trading (REAL MONEY)';
-      }
-    }
-  }
-
-  // Subscription & Trial UI Init
-  initSubscriptionUI(data);
-}
-
-// ── Heartbeat Pulse: Drives Live Updates & Keeps Bot Awake ──
-function startHeartbeatPulse() {
+  // Live refresh every 5s
   setInterval(async () => {
-    const data = await chrome.storage.local.get(['stats', 'tradeLog', 'botRunning', 'activeTrade']);
-    if (data.stats) updateDashboardStats(data.stats);
-    
-    if (data.tradeLog && data.tradeLog.length !== tradeLog.length) {
-      tradeLog  = data.tradeLog;
-      allTrades = [...tradeLog];
-      renderLogList();
-      renderFullLog();
-    }
+    await loadOverview();
+    await loadHealth();
+  }, 5000);
 
-    if (data.botRunning) {
-      chrome.runtime.sendMessage({ action: 'HEARTBEAT', strategy: selectedStrat }).catch(()=>{});
-    }
-
-    if (data.activeTrade) {
-      updateActivePositionUI(data.activeTrade);
-    } else {
-      updateActivePositionUI(null);
-    }
-  }, 15000);
-}
-
-// ── Listen to background messages ────────────────────────
-function listenToBackground() {
+  // Live message listener (from background service worker)
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.action === 'TRADE_EXECUTED') {
-      tradeLog.unshift(msg.trade);
-      allTrades = [...tradeLog];
-      renderLogList();
-      renderFullLog();
-      updateDashboardStats(msg.stats);
-      showToast(`✅ ${msg.trade.type} ${msg.trade.symbol} → P&L: ${msg.trade.pnl > 0 ? '+' : ''}$${msg.trade.pnl.toFixed(2)}`);
-    }
-    if (msg.action === 'BOT_STATUS') {
-      botActive = msg.running;
-      applyBotUI(msg.running, msg.statusText, msg.strategy, msg.lastScan);
-    }
-    if (msg.action === 'POSITION_UPDATE') {
-      updateActivePositionUI(msg.position);
-    }
-    if (msg.action === 'STRATEGY_CHANGED') {
-      selectedStrat = msg.newStrategy;
-      highlightStrategy(msg.newStrategy);
-      showToast(`🔄 Auto-Switch: Using ${msg.newStrategy}`, false);
-    }
-    if (msg.action === 'TARGET_REACHED') {
-      showToast(`🎯 Daily Target Hit! Securing profits.`, false);
-    }
-    if (msg.action === 'HEARTBEAT') {
-      const pulse = document.getElementById('heartbeat-pulse');
-      if (pulse) {
-        pulse.style.display = 'inline-block';
-        pulse.style.color = '#22d3ee';
-        setTimeout(() => { pulse.style.color = 'transparent'; }, 500);
-      }
-    }
+    if (msg.action === 'BOT_STATUS')      updateBotStatus(msg.status);
+    if (msg.action === 'POSITION_UPDATE') renderPosition(msg.position);
+    if (msg.action === 'ACTION_LOG')      appendLog(msg.text);
   });
+});
+
+/* ── Listeners ───────────────────────────────────── */
+function initListeners() {
+  document.getElementById('save-api-btn').addEventListener('click', saveApiKeys);
+  document.getElementById('test-api-btn').addEventListener('click', testConnection);
+  document.getElementById('save-settings-btn').addEventListener('click', saveTradeSettings);
+  document.getElementById('refresh-btn').addEventListener('click', loadOverview);
+  document.getElementById('close-pos-btn').addEventListener('click', closePosition);
+  document.getElementById('force-clear-btn').addEventListener('click', forceClear);
+  document.getElementById('activate-btn').addEventListener('click', activateLicense);
+  document.getElementById('copy-device-btn').addEventListener('click', copyDeviceId);
+  document.getElementById('clear-history-btn').addEventListener('click', clearHistory);
 }
 
-// ── Page Navigation ───────────────────────────────────────
-function showPage(name, navEl) {
-  const targetPage = document.getElementById('page-' + name);
-  if (!targetPage) return;
+/* ── System Health ───────────────────────────────── */
+async function loadHealth() {
+  const h = await sendMsg({ action: 'GET_HEALTH' });
+  if (!h) return;
 
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
-  
-  targetPage.classList.add('active');
-  if (navEl) navEl.classList.add('active');
-  
-  currentPage = name;
-  const titles = {
-    overview: ['Overview', 'Live trading dashboard'],
-    trades:   ['Trade Log', 'Full trading history'],
-    settings: ['Settings', 'Configure API keys & connection'],
-    subscription: ['Subscription', 'Manage your license & trial']
-  };
+  const apiEl = document.getElementById('h-api');
+  apiEl.textContent = h.api ? 'CONNECTED' : 'NOT SET';
+  apiEl.className   = `h-val ${h.api ? 'good' : 'bad'}`;
 
-  const titleEl = document.getElementById('page-title');
-  const subEl = document.getElementById('page-subtitle');
-  if (titleEl && titles[name]) titleEl.textContent = titles[name][0];
-  if (subEl && titles[name]) subEl.textContent = titles[name][1];
+  const modeEl = document.getElementById('h-mode');
+  modeEl.textContent = h.mode || '–';
+  modeEl.className   = `h-val ${h.mode === 'LIVE' ? 'warn' : ''}`;
+
+  const botEl = document.getElementById('h-bot');
+  botEl.textContent = h.running ? 'RUNNING' : 'STOPPED';
+  botEl.className   = `h-val ${h.running ? 'good' : 'bad'}`;
+
+  const licEl = document.getElementById('h-license');
+  licEl.textContent = h.license || '–';
+  licEl.className   = `h-val ${h.license === 'PRO' ? 'good' : h.license === 'TRIAL' ? 'warn' : 'bad'}`;
 }
 
-// ── Dashboard Stats ───────────────────────────────────────
-function updateDashboardStats(stats) {
-  setVal('d-balance', parseFloat(stats.balance || 0).toFixed(2));
-  const pnl = parseFloat(stats.todayPnl || 0);
-  const pnlEl = document.getElementById('d-pnl');
-  pnlEl.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2);
-  pnlEl.className   = 'stat-card-value ' + (pnl >= 0 ? 'cyan-val' : 'red-val');
-  const pct = stats.balance > 0 ? ((pnl / stats.balance) * 100).toFixed(2) : 0;
-  const pctEl = document.getElementById('d-pnl-pct');
-  pctEl.textContent = (pnl >= 0 ? '+' : '') + pct + '%';
-  pctEl.className   = pnl >= 0 ? 'stat-card-sub up' : 'stat-card-sub down';
+/* ── Overview ────────────────────────────────────── */
+async function loadOverview() {
+  const d = await chrome.storage.local.get(['stats', 'activeTrade', 'botRunning']);
 
-  if (stats.winRate !== undefined) {
-    setVal('d-winrate', stats.winRate + '%');
-    setVal('d-winrate-sub', `${stats.wins || 0}W / ${stats.losses || 0}L`);
+  if (d.stats) {
+    const s = d.stats;
+    const pnl = parseFloat(s.dailyPnl || 0);
+
+    document.getElementById('ov-balance').textContent = parseFloat(s.balance || 0).toFixed(2) + ' USDT';
+    const pnlEl = document.getElementById('ov-pnl');
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+    pnlEl.className   = `metric-value ${pnl >= 0 ? 'green' : 'red'}`;
+
+    document.getElementById('ov-winrate').textContent = (s.winRate || 0) + '%';
+    document.getElementById('ov-total').textContent   = s.totalTrades || 0;
   }
-  if (stats.totalTrades !== undefined) {
-    setVal('d-total-trades', stats.totalTrades);
-    setVal('d-active-sub',   `${stats.activeTrades || 0} active`);
+
+  renderPosition(d.activeTrade || null);
+  updateBotStatus(d.botRunning ? 'running' : 'stopped');
+}
+
+function updateBotStatus(status) {
+  const botEl = document.getElementById('h-bot');
+  if (botEl) {
+    botEl.textContent = status === 'running' ? 'RUNNING' : 'STOPPED';
+    botEl.className   = `h-val ${status === 'running' ? 'good' : 'bad'}`;
   }
-  const sbStrat = document.getElementById('sb-strategy');
-  if (sbStrat) sbStrat.textContent = selectedStrat || 'No strategy';
 }
 
-function setVal(id, val) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = val;
-}
+/* ── Position Panel ──────────────────────────────── */
+function renderPosition(pos) {
+  const panel = document.getElementById('position-panel');
+  const closeBtn = document.getElementById('close-pos-btn');
 
-// ── Bot Control ───────────────────────────────────────────
-async function toggleBotDashboard() {
-  const data = await chrome.storage.local.get(['apiKey']);
-  if (!data.apiKey) {
-    showToast('⚠️ Please save API Keys first!', true);
-    showPage('settings', document.querySelectorAll('.nav-link')[2]);
+  if (!pos) {
+    panel.innerHTML = '<div class="no-trade">No open position</div>';
+    closeBtn.style.display = 'none';
     return;
   }
 
-  const settings = getTradeSettings();
-  const targetState = !botActive;
+  closeBtn.style.display = 'inline-flex';
+  const pnl = pos.pnl || 0;
+  const pnlPct = pos.pnlPct || 0;
+  const badge = pos.direction === 'LONG' ? 'long-badge' : 'short-badge';
+  const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+  const modeB = pos.mode === 'LIVE' ? 'badge-live' : 'badge-paper';
 
-  if (targetState) {
-    // Attempting to START
-    chrome.runtime.sendMessage({
-      action: 'START_BOT',
-      strategy: selectedStrat,
-      settings
-    }, async (res) => {
-      if (chrome.runtime.lastError) {
-        showToast('❌ Background communication error', true);
-        return;
-      }
-      if (res && res.ok) {
-        botActive = true;
-        applyBotUI(true);
-        await chrome.storage.local.set({ 
-          botRunning: true, 
-          selectedStrategy: selectedStrat, 
-          savedSettings: settings,
-          autoRisk: settings.autoRisk 
-        });
-        showToast(`🚀 Bot started — ${selectedStrat}`);
-      } else {
-        const errMsg = (res && res.error) ? res.error : 'License required or API error';
-        showToast(`⚠️ Failed to start: ${errMsg}`, true);
-        botActive = false;
-        applyBotUI(false);
-      }
-    });
-  } else {
-    // Attempting to STOP
-    chrome.runtime.sendMessage({ action: 'STOP_BOT' }, async () => {
-      botActive = false;
-      applyBotUI(false);
-      await chrome.storage.local.set({ botRunning: false });
-      showToast('⛔ Bot stopped');
-    });
-  }
-}
-
-function getTradeSettings() {
-  return {
-    symbol:    document.getElementById('d-symbol')?.value    || 'BTCUSDT',
-    amount:    document.getElementById('d-amount')?.value    || '50',
-    autoRisk:  document.getElementById('d-auto-risk')?.checked || false,
-    risk:      '2',
-    leverage:  document.getElementById('lever-range')?.value || '20',
-    stopLoss:  document.getElementById('d-sl')?.value        || '0.5',
-    takeProfit:document.getElementById('d-tp')?.value        || '1.0',
-    trailingSl:'0',
-    autoCompound: false,
-    dailyTarget: '20',
-    autoSwitch: false,
-    mode:      document.getElementById('d-mode')?.value      || 'paper'
-  };
-}
-
-function applyBotUI(running, statusText = null, activeStrat = null, lastScan = null) {
-  const bigDot  = document.getElementById('big-dot');
-  const bigTxt  = document.getElementById('big-status-text');
-  const bigBtn  = document.getElementById('big-start-btn');
-  const sbDot   = document.getElementById('sb-dot');
-  const sbStatus= document.getElementById('sb-status');
-
-  const lastCheckEl = document.getElementById('sb-last-check');
-
-  if (running) {
-    bigDot.className  = 'dot-lg on';
-    bigTxt.textContent= statusText || 'BOT RUNNING';
-    if (sbStatus) sbStatus.textContent = statusText || 'Bot Online';
-    
-    bigBtn.className  = 'btn-stop-big';
-    bigBtn.innerHTML  = '⛔ STOP BOT';
-    sbDot.className   = 'dot-sm on';
-
-    if (lastScan && lastCheckEl) {
-      const timeStr = new Date(lastScan).toLocaleTimeString().slice(0, 8);
-      lastCheckEl.style.display = 'block';
-      lastCheckEl.textContent = '● Last: ' + timeStr;
-      lastCheckEl.style.color = 'var(--cyan)';
-      setTimeout(() => lastCheckEl.style.color = '#94a3b8', 1000);
-    }
-  } else {
-    bigDot.className  = 'dot-lg off';
-    bigTxt.textContent= 'BOT OFFLINE';
-    if (sbStatus) sbStatus.textContent = 'Bot Offline';
-    
-    bigBtn.className  = 'btn-start-big';
-    bigBtn.innerHTML  = '▶ START BOT ⚡';
-    sbDot.className   = 'dot-sm off';
-    
-    if (lastCheckEl) lastCheckEl.style.display = 'none';
-  }
-
-  // Update Topbar Trading Mode Badge
-  const topBadge = document.querySelector('.badge-live');
-  const modeVal = document.getElementById('d-mode')?.value;
-  const isTestnet = document.getElementById('use-testnet')?.value === 'true';
-
-  if (topBadge) {
-    if (modeVal === 'live') {
-      if (isTestnet) {
-        topBadge.innerHTML = '<div class="dot-sm on" style="background:var(--cyan)"></div> TESTNET LIVE';
-        topBadge.style.borderColor = 'var(--cyan)';
-        topBadge.style.color = 'var(--cyan)';
-      } else {
-        topBadge.innerHTML = '<div class="dot-sm on" style="background:var(--red)"></div> REAL MONEY LIVE';
-        topBadge.style.borderColor = 'var(--red)';
-        topBadge.style.color = 'var(--red)';
-        topBadge.classList.add('pulse-red');
-      }
-    } else {
-      topBadge.innerHTML = '<div class="dot-sm off"></div> PAPER TRADING';
-      topBadge.style.borderColor = 'var(--border)';
-      topBadge.style.color = 'var(--muted)';
-      topBadge.classList.remove('pulse-red');
-    }
-  }
-}
-
-function selectBigStrategy(el, strategy) {
-  document.querySelectorAll('.strategy-big-card').forEach(c => {
-    c.className = 'strategy-big-card';
-  });
-  const classMap = { 'RSI+EMA':'sel-rsi', MACD:'sel-macd', Scalping:'sel-scalp', 'Deep AI':'sel-ai' };
-  el.classList.add(classMap[strategy] || '');
-  selectedStrat = strategy;
-
-  chrome.storage.local.remove(['selectedStrategy'], () => {
-    chrome.storage.local.set({ selectedStrategy: strategy });
-  });
-
-  document.getElementById('big-strategy-text').textContent = `Strategy: ${strategy}`;
-  document.getElementById('sb-strategy').textContent = strategy;
-
-  chrome.runtime.sendMessage({ action: 'UPDATE_STRATEGY', strategy });
-}
-
-function highlightStrategy(strat) {
-  const map = { 'RSI+EMA':'sel-rsi', MACD:'sel-macd', Scalping:'sel-scalp', 'Deep AI':'sel-ai' };
-  document.querySelectorAll('.strategy-big-card').forEach(c => {
-    c.className = 'strategy-big-card';
-    if (c.dataset.strat === strat) c.classList.add(map[strat] || '');
-  });
-  selectedStrat = strat;
-  document.getElementById('big-strategy-text').textContent = `Strategy: ${strat}`;
-  const sideStrat = document.getElementById('sb-strategy');
-  if (sideStrat) sideStrat.textContent = strat;
-}
-
-// ── Leverage Slider ───────────────────────────────────────
-function updateLeverage(val) {
-  document.getElementById('lever-val').textContent = val + 'x';
-}
-
-// ── Trade Log — Mini List ─────────────────────────────────
-function renderLogList() {
-  const container = document.getElementById('log-list');
-  if (!tradeLog.length) {
-    container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No trades yet. Start the bot to begin trading.</div>';
-    return;
-  }
-  container.innerHTML = tradeLog.slice(0, 10).map(t => `
-    <div class="log-item">
-      <span class="log-type ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction}</span>
-      <span style="font-weight:600">${t.symbol}</span>
-      <span style="color:var(--muted)">${t.strategy}</span>
-      <span class="log-pnl ${t.pnl >= 0 ? 'pos' : 'neg'}">${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}</span>
-      <span class="log-time">${t.time}</span>
+  panel.innerHTML = `
+    <div class="position-grid">
+      <div class="pos-item">
+        <div class="pos-label">DIRECTION</div>
+        <div class="pos-val"><span class="${badge}">${pos.direction}</span></div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-label">SYMBOL</div>
+        <div class="pos-val">${pos.symbol}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-label">MODE</div>
+        <div class="pos-val"><span class="${modeB}">${pos.mode}</span></div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-label">ENTRY PRICE</div>
+        <div class="pos-val">$${parseFloat(pos.entry).toFixed(2)}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-label">MARK PRICE</div>
+        <div class="pos-val">$${parseFloat(pos.markPrice || pos.entry).toFixed(2)}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-label">UNREAL P&L</div>
+        <div class="pos-val ${pnlCls}">${pnl >= 0 ? '+' : ''}${parseFloat(pnl).toFixed(4)} (${pnlPct >= 0 ? '+' : ''}${parseFloat(pnlPct).toFixed(2)}%)</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-label">STOP LOSS</div>
+        <div class="pos-val" style="color:var(--red)">$${parseFloat(pos.sl).toFixed(2)}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-label">TAKE PROFIT</div>
+        <div class="pos-val" style="color:var(--green)">$${parseFloat(pos.tp).toFixed(2)}</div>
+      </div>
+      <div class="pos-item">
+        <div class="pos-label">OPENED AT</div>
+        <div class="pos-val" style="font-size:12px">${pos.time || '–'}</div>
+      </div>
     </div>
-  `).join('');
+  `;
 }
 
-// ── Trade Log — Full Table ────────────────────────────────
-function renderFullLog(filter = currentFilter) {
-  const tbody = document.getElementById('full-log-body');
-  let data = [...allTrades];
-  if (filter === 'LONG')  data = data.filter(t => t.direction === 'LONG');
-  if (filter === 'SHORT') data = data.filter(t => t.direction === 'SHORT');
-  if (filter === 'win')   data = data.filter(t => t.pnl > 0);
-  if (filter === 'loss')  data = data.filter(t => t.pnl <= 0);
-
-  if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">No trades match this filter.</td></tr>';
-    return;
+async function closePosition() {
+  const btn = document.getElementById('close-pos-btn');
+  btn.textContent = '⏳ Closing...';
+  btn.disabled = true;
+  try {
+    const r = await sendMsg({ action: 'CLOSE_POSITION' });
+    if (r?.ok) showResult('pos', 'Position closed successfully.', 'ok');
+    else showResult('pos', r?.error || 'Close failed.', 'err');
+  } catch (e) {
+    showResult('pos', e.message, 'err');
   }
-  tbody.innerHTML = data.map(t => `
-    <tr>
-      <td><span class="log-type ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction}</span></td>
-      <td style="font-weight:700">${t.symbol}</td>
-      <td style="font-family:'JetBrains Mono',monospace">${t.entry}</td>
-      <td style="font-family:'JetBrains Mono',monospace">${t.exit}</td>
-      <td class="log-pnl ${t.pnl >= 0 ? 'pos' : 'neg'}">${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}</td>
-      <td style="color:var(--muted)">${t.strategy}</td>
-      <td class="log-time">${t.time}</td>
-    </tr>
-  `).join('');
+  btn.textContent = '⛔ Close Position';
+  btn.disabled = false;
 }
 
-function filterLog(type, btn) {
-  currentFilter = type;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  renderFullLog(type);
+async function forceClear() {
+  if (!confirm('Force clear active trade from local state? (No Binance order sent)')) return;
+  await sendMsg({ action: 'FORCE_CLEAR' });
+  renderPosition(null);
 }
 
-async function clearLog() {
-  if (!confirm('Clear all trade history?')) return;
-  tradeLog = []; allTrades = [];
-  await chrome.storage.local.set({ tradeLog: [] });
-  renderLogList(); renderFullLog();
-  showToast('🗑️ Trade log cleared');
+/* ── Action Log ──────────────────────────────────── */
+function appendLog(text) {
+  const box = document.getElementById('action-log');
+  if (!box) return;
+  if (box.children.length === 1 && box.children[0].classList.contains('muted')) {
+    box.innerHTML = '';
+  }
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  const cls = text.includes('✅') || text.includes('🟢') ? 'good'
+    : text.includes('❌') || text.includes('🛑') ? 'bad' : '';
+  if (cls) line.classList.add(cls);
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  box.prepend(line);
+  while (box.children.length > 80) box.lastChild.remove();
 }
 
-// ── API Settings ──────────────────────────────────────────
+/* ── Settings ────────────────────────────────────── */
+async function loadSettings() {
+  const d = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet', 'savedSettings']);
+  if (d.apiKey)    document.getElementById('s-api-key').value    = d.apiKey;
+  if (d.apiSecret) document.getElementById('s-api-secret').value = d.apiSecret;
+  document.getElementById('s-testnet').value = d.useTestnet === false ? 'false' : 'true';
+
+  const s = d.savedSettings || {};
+  if (s.symbol)   document.getElementById('s-symbol').value   = s.symbol;
+  if (s.leverage) document.getElementById('s-leverage').value = s.leverage;
+  if (s.risk)     document.getElementById('s-risk').value     = s.risk;
+  if (s.stopLoss) document.getElementById('s-sl').value       = s.stopLoss;
+  if (s.takeProfit) document.getElementById('s-tp').value     = s.takeProfit;
+  if (s.amount)   document.getElementById('s-amount').value   = s.amount;
+  if (s.mode)     document.getElementById('s-mode').value     = s.mode;
+}
+
 async function saveApiKeys() {
-  const key    = document.getElementById('api-key').value.trim();
-  const secret = document.getElementById('api-secret').value.trim();
-  const testnet= document.getElementById('use-testnet').value;
-  const gemini = document.getElementById('gemini-key') ? document.getElementById('gemini-key').value.trim() : '';
-  if (!key || !secret) { showToast('⚠️ Please enter both API Key and Secret', true); return; }
-  
-  const isTestnet = testnet === 'true';
+  const apiKey    = document.getElementById('s-api-key').value.trim();
+  const apiSecret = document.getElementById('s-api-secret').value.trim();
+  const useTestnet = document.getElementById('s-testnet').value !== 'false';
 
-  await chrome.storage.local.set({ 
-    apiKey: key, 
-    apiSecret: secret, 
-    useTestnet: isTestnet, 
-    geminiKey: gemini
-  });
-  
-  const modeEl = document.getElementById('d-mode');
-  if (modeEl) {
-    const liveOption = modeEl.options[1];
-    liveOption.textContent = isTestnet ? '🚀 Live on Testnet (Safe)' : '🔴 Live Trading (REAL MONEY)';
+  if (!apiKey || !apiSecret) {
+    showResult('api', '❌ Both fields are required.', 'err'); return;
   }
 
-  showToast('✅ API Keys & Mode saved!');
-  chrome.runtime.sendMessage({ 
-    action: 'UPDATE_KEYS', 
-    apiKey: key, 
-    apiSecret: secret, 
-    useTestnet: isTestnet, 
-    geminiKey: gemini
-  });
+  await chrome.storage.local.set({ apiKey, apiSecret, useTestnet });
+  await sendMsg({ action: 'UPDATE_KEYS', apiKey, apiSecret, useTestnet });
+  showResult('api', '✅ API Keys saved!', 'ok');
 }
 
 async function testConnection() {
-  const data = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet']);
-  if (!data.apiKey) { showToast('⚠️ Save API Keys first!', true); return; }
-  const el = document.getElementById('conn-status');
-
-  const baseUrl = data.useTestnet === false ? 'https://fapi.binance.com' : 'https://testnet.binancefuture.com';
-  el.textContent = '🔄 Testing network ping...';
-  el.style.color = 'var(--amber)';
-
+  showResult('api', '⏳ Testing...', '');
   try {
-    const pingRes = await fetchWithTimeout(`${baseUrl}/fapi/v1/ping`, {}, 5000);
-    if (!pingRes.ok) throw new Error('Ping failed (HTTP ' + pingRes.status + ')');
-    el.textContent = '🔄 Ping OK. Checking API keys...';
-  } catch (err) {
-    el.textContent = `❌ Network Blocked: Cannot reach Binance. Use VPN! (${err.message})`;
-    el.style.color = 'var(--red)';
-    showToast('❌ Network blocked — enable VPN', true);
-    return;
-  }
-
-  try {
-    // Sync with Binance time first
-    const timeRes = await fetch(`${baseUrl}/fapi/v1/time`);
-    const timeData = await timeRes.json();
-    const ts = timeData.serverTime;
-    
-    const query = `timestamp=${ts}`;
-    const key  = data.apiKey.trim();
-    const sec  = data.apiSecret.trim();
-
-    const enc  = new TextEncoder();
-    const cryptoKey = await crypto.subtle.importKey('raw', enc.encode(sec), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const sig  = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(query));
-    const sigHex = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
-
-    const balRes = await fetchWithTimeout(`${baseUrl}/fapi/v2/balance?${query}&signature=${sigHex}`, {
-      headers: { 'X-MBX-APIKEY': key }
-    }, 8000);
-
-    if (!balRes.ok) {
-      const errData = await balRes.json().catch(() => ({}));
-      throw new Error(errData.msg || `HTTP ${balRes.status}`);
-    }
-
-    const balData = await balRes.json();
-    const usdt = Array.isArray(balData) ? balData.find(b => b.asset === 'USDT') : null;
-    const balance = usdt ? parseFloat(usdt.balance).toFixed(2) : '?';
-
-    el.textContent = `✅ Connected! Balance: ${balance} USDT (${data.useTestnet === false ? 'Live' : 'Testnet'})`;
-    el.style.color = 'var(--green)';
-    showToast('✅ Binance API connected successfully!');
-
-    // Update the live balance in local stats so the UI syncs it!
-    if (!isNaN(balance)) {
-      const statsData = await chrome.storage.local.get('stats');
-      const stats = statsData.stats || { balance: 1000, todayPnl: 0, wins: 0, losses: 0, totalTrades: 0, activeTrades: 0 };
-      stats.balance = parseFloat(balance);
-      await chrome.storage.local.set({ stats });
-    }
-  } catch (err) {
-    el.textContent = `❌ API Error: ${err.message}`;
-    el.style.color = 'var(--red)';
-    showToast('❌ API Test failed: ' + err.message, true);
+    const r = await sendMsg({ action: 'TEST_CONNECTION' });
+    if (r?.ok) showResult('api', `✅ Connected! Balance: ${r.balance} USDT`, 'ok');
+    else       showResult('api', `❌ ${r?.error || 'Connection failed'}`, 'err');
+  } catch (e) {
+    showResult('api', `❌ Error: ${e.message}`, 'err');
   }
 }
 
-function toggleVis(id, btn) {
-  const inp = document.getElementById(id);
-  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
-  else                         { inp.type = 'password'; btn.textContent = '👁'; }
-}
-
-// ── Toast ─────────────────────────────────────────────────
-function showToast(msg, isError = false) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className   = isError ? 'toast show error' : 'toast show';
-  setTimeout(() => t.classList.remove('show'), 3000);
-}
-
-// ── Position Helper Functions ────────────────────────────
-async function forceClosePosition() {
-  const btn = document.getElementById('close-pos-btn');
-  const originalText = btn ? btn.innerHTML : '✖ CLOSE POSITION';
-  if (btn) { 
-    btn.disabled = true; 
-    btn.innerHTML = '<span class="status-mini-glow"></span> CLOSING...';
-    btn.classList.add('btn-loading');
-  }
-
-  const safetyTimer = setTimeout(() => {
-    if (btn) { 
-      btn.disabled = false; 
-      btn.innerHTML = '💥 FORCE CLEAR'; 
-      btn.style.borderColor = 'var(--red)';
-      btn.style.color = 'var(--red)';
-      btn.onclick = async () => {
-        if (!confirm('Force clear will remove the trade from the bot locally. Proceed?')) return;
-        chrome.runtime.sendMessage({ action: 'FORCE_CLEAR_TRADE' }, () => {
-          updateActivePositionUI(null);
-          showToast('💥 Local record purged.', true);
-          btn.onclick = forceClosePosition;
-        });
-      };
-    }
-    showToast('⚠️ Close taking longer than expected...', true);
-  }, 6000);
-
-  chrome.runtime.sendMessage({ action: 'CLOSE_POSITION' }, (res) => {
-    clearTimeout(safetyTimer);
-    if (btn) { 
-      btn.disabled = false; 
-      btn.innerHTML = originalText;
-      btn.classList.remove('btn-loading');
-    }
-
-    if (chrome.runtime.lastError) {
-      showToast('❌ Background error: ' + chrome.runtime.lastError.message, true);
-      return;
-    }
-
-    if (res && res.ok) {
-      showToast('✅ Position closed successfully.');
-      updateActivePositionUI(null);
-    } else {
-      const err = (res ? res.error : 'No response');
-      showToast('❌ Close failed: ' + err, true);
-      
-      if (btn) {
-        btn.innerHTML = '💥 FORCE CLEAR';
-        btn.classList.add('pulse-red');
-        btn.onclick = async () => {
-           chrome.runtime.sendMessage({ action: 'FORCE_CLEAR_TRADE' }, () => {
-             updateActivePositionUI(null);
-             btn.onclick = forceClosePosition;
-           });
-        };
-      }
-    }
-  });
-}
-
-async function syncActiveTrade() {
-  const data = await chrome.storage.local.get(['activeTrade']);
-  updateActivePositionUI(data.activeTrade || null);
-}
-
-function updateActivePositionUI(pos) {
-  const wrap = document.getElementById('active-position-wrap');
-  if (!wrap) return;
-  
-  if (!pos) {
-    wrap.style.display = 'none';
-    return;
-  }
-
-  wrap.style.display = 'block';
-  document.getElementById('ap-symbol').textContent = pos.symbol;
-  document.getElementById('ap-entry').textContent  = parseFloat(pos.entry).toFixed(2);
-  document.getElementById('ap-mark').textContent   = parseFloat(pos.markPrice).toFixed(2);
-  document.getElementById('ap-sl').textContent     = parseFloat(pos.sl).toFixed(2);
-  document.getElementById('ap-tp').textContent     = parseFloat(pos.tp).toFixed(2);
-  
-  const pnlEl = document.getElementById('ap-pnl');
-  const pctEl = document.getElementById('ap-pnl-pct');
-  const badge = document.getElementById('ap-badge');
-
-  pnlEl.classList.remove('pulse-lite');
-  void pnlEl.offsetWidth;
-  pnlEl.classList.add('pulse-lite');
-
-  const dir = pos.direction || 'LONG';
-  badge.textContent = dir;
-  badge.className = 'pos-badge ' + dir.toLowerCase();
-
-  const amtEl = document.getElementById('ap-amount');
-  if (amtEl) amtEl.textContent = parseFloat(pos.amount || 0).toFixed(2);
-
-  const pnl = parseFloat(pos.pnl);
-  pnlEl.textContent = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);
-  pnlEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-  
-  pctEl.textContent = (pnl >= 0 ? '+' : '') + pos.pnlPct + '%';
-  pctEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-}
-
-// ── Subscription Logic ────────────────────────────────────
-let trialTimerInterval = null;
-
-function initSubscriptionUI(data) {
-  const licenseKey = data.licenseKey || '';
-  const installTime = data.installTime || Date.now();
-  const activationDate = data.activationDate || null;
-  const deviceId = data.deviceId || '---';
-  
-  // Set IDs
-  const licInput = document.getElementById('license-key-input');
-  if (licInput) licInput.value = licenseKey;
-  
-  const devEl = document.getElementById('device-id-field');
-  if (devEl) devEl.value = deviceId;
-
-  updateSubscriptionStatus(licenseKey, installTime, activationDate);
-  
-  // Start countdown if no license or if license exists (to show days left)
-  startTrialCountdown(installTime, activationDate, licenseKey);
-}
-
-function updateSubscriptionStatus(key, installTime, activationDate) {
-  const msgEl = document.getElementById('sub-status-msg');
-  const badge = document.getElementById('trial-badge');
-  const timerEl = document.getElementById('trial-timer');
-  const startBtn = document.getElementById('big-start-btn');
-  const now = Date.now();
-
-  if (isValidLicense(key) && activationDate) {
-    const elapsed = now - activationDate;
-    const timeLeft = 2592000000 - elapsed; // 30 Days
-    const daysLeft = Math.ceil(timeLeft / (1000 * 60 * 60 * 24));
-
-    if (timeLeft > 0) {
-      if (msgEl) {
-        msgEl.textContent = `✅ LICENSE ACTIVE — ${daysLeft} DAYS REMAINING`;
-        msgEl.style.color = 'var(--green)';
-      }
-      if (badge) {
-        badge.style.display = 'block';
-        badge.style.background = 'rgba(16,185,129,0.05)';
-        badge.style.borderColor = 'rgba(16,185,129,0.2)';
-      }
-      if (timerEl) {
-        timerEl.textContent = `${daysLeft} days left`;
-        timerEl.style.color = 'var(--green)';
-      }
-      if (startBtn) startBtn.disabled = false;
-      return;
-    } else {
-      // License Expired
-      if (msgEl) {
-        msgEl.textContent = '❌ LICENSE EXPIRED — RENEWAL REQUIRED';
-        msgEl.style.color = 'var(--red)';
-      }
-      if (startBtn) startBtn.disabled = true;
-    }
-  }
-
-  // Fallback to Trial logic if no license or license expired
-  if (!isValidLicense(key)) {
-    const trialLeft = 3600000 - (now - installTime);
-    if (trialLeft > 0) {
-      if (badge) badge.style.display = 'block';
-    } else {
-      if (msgEl) {
-        msgEl.textContent = '❌ TRIAL EXPIRED — SUBSCRIPTION REQUIRED';
-        msgEl.style.color = 'var(--red)';
-      }
-      if (badge) {
-        badge.style.background = 'rgba(244,63,94,0.1)';
-        badge.style.borderColor = 'var(--red)';
-        if (timerEl) {
-          timerEl.style.color = 'var(--red)';
-          timerEl.textContent = 'EXPIRED';
-        }
-      }
-      if (startBtn) startBtn.disabled = true;
-    }
-  }
-}
-
-function startTrialCountdown(installTime, activationDate, key) {
-  const timerEl = document.getElementById('trial-timer');
-  const badge = document.getElementById('trial-badge');
-  if (trialTimerInterval) clearInterval(trialTimerInterval);
-
-  const tick = () => {
-    const now = Date.now();
-    
-    // If License is active, show days
-    if (isValidLicense(key) && activationDate) {
-       const timeLeft = 2592000000 - (now - activationDate);
-       const days = Math.ceil(timeLeft / 86400000);
-       if (days > 0) {
-         timerEl.textContent = `${days} days left`;
-         return;
-       }
-    }
-
-    // Otherwise show trial timer
-    const elapsed = now - installTime;
-    const timeLeft = 3600000 - elapsed;
-
-    if (timeLeft <= 0) {
-      timerEl.textContent = 'EXPIRED';
-      timerEl.style.color = 'var(--red)';
-      if (badge) badge.style.background = 'rgba(244,63,94,0.1)';
-      clearInterval(trialTimerInterval);
-      updateSubscriptionStatus(key, installTime, activationDate);
-      return;
-    }
-
-    const mins = Math.floor(timeLeft / 60000);
-    const secs = Math.floor((timeLeft % 60000) / 1000);
-    timerEl.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs} left`;
-    if (badge) badge.style.display = 'block';
+async function saveTradeSettings() {
+  const settings = {
+    symbol:     (document.getElementById('s-symbol').value || 'BTCUSDT').toUpperCase(),
+    leverage:   parseInt(document.getElementById('s-leverage').value || 10),
+    risk:       Math.min(parseFloat(document.getElementById('s-risk').value || 2), 2),
+    stopLoss:   parseFloat(document.getElementById('s-sl').value || 1.5),
+    takeProfit: parseFloat(document.getElementById('s-tp').value || 3),
+    amount:     parseFloat(document.getElementById('s-amount').value || 50),
+    mode:       document.getElementById('s-mode').value || 'paper'
   };
+  await chrome.storage.local.set({ savedSettings: settings });
+  showResult('settings', '✅ Settings saved!', 'ok');
+}
 
-  tick();
-  trialTimerInterval = setInterval(tick, 1000);
+function showResult(area, msg, type) {
+  const ids = { api: 'api-result', settings: 'settings-result', pos: 'api-result', license: 'license-result' };
+  const el = document.getElementById(ids[area]);
+  if (!el) return;
+  el.textContent  = msg;
+  el.className    = `result-msg ${type === 'ok' ? 'ok' : type === 'err' ? 'err' : ''}`;
+}
+
+/* ── Trade History ────────────────────────────────── */
+async function loadTradeHistory() {
+  const d = await chrome.storage.local.get('tradeHistory');
+  const history = d.tradeHistory || [];
+  const tbody   = document.getElementById('history-body');
+
+  if (!history.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="no-data">No trades yet.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = history.map(t => {
+    const pnlNum = parseFloat(t.pnl);
+    const pnlCls = pnlNum >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const pnlStr = (pnlNum >= 0 ? '+' : '') + pnlNum.toFixed(4);
+    const modeBadge = t.mode === 'LIVE' ? 'badge-live' : 'badge-paper';
+    const time = t.closedAt ? new Date(t.closedAt).toLocaleString() : '–';
+    return `<tr>
+      <td>${t.symbol}</td>
+      <td>${t.direction}</td>
+      <td>$${parseFloat(t.entry).toFixed(2)}</td>
+      <td>$${parseFloat(t.exit).toFixed(2)}</td>
+      <td class="${pnlCls}">${pnlStr}</td>
+      <td>${t.reason}</td>
+      <td><span class="${modeBadge}">${t.mode}</span></td>
+      <td style="font-size:11px;color:var(--muted)">${time}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function clearHistory() {
+  if (!confirm('Clear all trade history?')) return;
+  await chrome.storage.local.remove('tradeHistory');
+  document.getElementById('history-body').innerHTML =
+    '<tr><td colspan="8" class="no-data">No trades yet.</td></tr>';
+}
+
+/* ── License ──────────────────────────────────────── */
+async function loadLicenseStatus() {
+  const d = await chrome.storage.local.get(['deviceId', 'licenseKey', 'activationDate', 'installTime']);
+  document.getElementById('device-id-text').textContent = d.deviceId || 'Generating...';
+
+  if (d.licenseKey) {
+    document.getElementById('license-key-input').value = d.licenseKey;
+  }
+
+  const now = Date.now();
+  if (d.licenseKey && d.activationDate) {
+    const elapsed   = now - d.activationDate;
+    const remaining = 2592000000 - elapsed;
+    const daysLeft  = Math.max(0, Math.ceil(remaining / 86400000));
+    document.getElementById('ls-status').textContent    = daysLeft > 0 ? '✅ ACTIVE PRO' : '❌ EXPIRED';
+    document.getElementById('ls-status').style.color    = daysLeft > 0 ? 'var(--green)' : 'var(--red)';
+    document.getElementById('ls-activated').textContent = new Date(d.activationDate).toLocaleDateString();
+    document.getElementById('ls-expiry').textContent    = new Date(d.activationDate + 2592000000).toLocaleDateString();
+    document.getElementById('ls-days').textContent      = daysLeft > 0 ? `${daysLeft} days` : 'Expired';
+  } else if (d.installTime) {
+    const trialLeft = 3600000 - (now - d.installTime);
+    const minsLeft  = Math.max(0, Math.ceil(trialLeft / 60000));
+    document.getElementById('ls-status').textContent    = minsLeft > 0 ? '⏳ FREE TRIAL' : '❌ TRIAL EXPIRED';
+    document.getElementById('ls-status').style.color    = minsLeft > 0 ? 'var(--amber)' : 'var(--red)';
+    document.getElementById('ls-activated').textContent = 'Trial';
+    document.getElementById('ls-expiry').textContent    = minsLeft > 0 ? 'Active' : 'Expired';
+    document.getElementById('ls-days').textContent      = minsLeft > 0 ? `${minsLeft} min remaining` : 'Expired';
+  }
 }
 
 async function activateLicense() {
-  const key = document.getElementById('license-key-input').value.trim();
-  if (!key) return showToast('Please enter a license key', true);
+  const key = document.getElementById('license-key-input').value.trim().toUpperCase();
+  if (!key.startsWith('FUTURES-AI-PRO-')) {
+    showResult('license', '❌ Invalid format. Must start with FUTURES-AI-PRO-', 'err'); return;
+  }
 
-  // Ask background to validate (as it has the SHA-256 logic)
-  const response = await chrome.runtime.sendMessage({ action: 'VALIDATE_KEY', key: key });
-  
-  if (response && response.valid) {
-    // Save new key AND reset activation date to "Now" to start a new 30-day period
-    await chrome.storage.local.set({ 
-      licenseKey: key, 
-      activationDate: Date.now() 
-    });
-    showToast('🚀 License Activated! 30 days of access granted.');
-    location.reload(); 
+  const r = await sendMsg({ action: 'VALIDATE_KEY', key });
+  if (r?.valid) {
+    await chrome.storage.local.set({ licenseKey: key, activationDate: Date.now() });
+    showResult('license', '🚀 License Activated! 30 days of PRO access granted.', 'ok');
+    await loadLicenseStatus();
   } else {
-    showToast('❌ Invalid License Key for this device. Contact support.', true);
+    showResult('license', '❌ Invalid key for this device. Please contact support.', 'err');
   }
 }
 
-function isValidLicense(key) {
-  // Simple check for UI, real check is in background
-  if (!key) return false;
-  return key.trim().toUpperCase().startsWith('FUTURES-AI-PRO-');
+async function copyDeviceId() {
+  const id = document.getElementById('device-id-text').textContent;
+  await navigator.clipboard.writeText(id).catch(() => {});
+  const btn = document.getElementById('copy-device-btn');
+  btn.textContent = '✅ Copied!';
+  setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
 }
 
-// ── AI Chatbot Logic ──────────────────────────────────────
-async function handleChatSend() {
-  const inputEl = document.getElementById('chat-input');
-  const text = inputEl.value.trim();
-  if (!text) return;
-  
-  inputEl.value = '';
-  appendChatMessage(text, 'user');
-  
-  const typingId = appendTypingIndicator();
-  
-  try {
-    const response = await chrome.runtime.sendMessage({ 
-      action: 'CHAT_QUERY', 
-      query: text 
-    });
-    
-    removeElement(typingId);
-    
-    if (response && response.reply) {
-      appendChatMessage(response.reply, 'bot');
-    } else {
-      appendChatMessage("I'm sorry, I'm having trouble connecting to my neural network right now.", 'bot');
-    }
-  } catch (err) {
-    removeElement(typingId);
-    appendChatMessage("Network error. Cannot reach the Oracle.", 'bot');
-  }
-}
-
-function appendChatMessage(text, sender) {
-  const container = document.getElementById('chat-messages');
-  const msgDiv = document.createElement('div');
-  msgDiv.className = `chat-msg ${sender}`;
-  
-  const avatar = document.createElement('div');
-  avatar.className = 'msg-avatar';
-  avatar.textContent = sender === 'user' ? '👤' : '🤖';
-  
-  const bubble = document.createElement('div');
-  bubble.className = 'msg-bubble';
-  bubble.textContent = text;
-  
-  msgDiv.appendChild(avatar);
-  msgDiv.appendChild(bubble);
-  container.appendChild(msgDiv);
-  container.scrollTop = container.scrollHeight;
-}
-
-function appendTypingIndicator() {
-  const container = document.getElementById('chat-messages');
-  const id = 'typing-' + Date.now();
-  
-  const msgDiv = document.createElement('div');
-  msgDiv.className = 'chat-msg bot';
-  msgDiv.id = id;
-  
-  msgDiv.innerHTML = `
-    <div class="msg-avatar">🤖</div>
-    <div class="msg-bubble">
-       <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
-    </div>
-  `;
-  container.appendChild(msgDiv);
-  container.scrollTop = container.scrollHeight;
-  return id;
-}
-
-function removeElement(id) {
-  const el = document.getElementById(id);
-  if (el) el.remove();
-}
-
-function copyToClipboard(id, msg) {
-  const el = document.getElementById(id);
-  el.select();
-  document.execCommand('copy');
-  showToast(msg);
-}
-
-// ── Fetch with Timeout ─────────────────────────────────────
-async function fetchWithTimeout(resource, options = {}, timeout = 6000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(resource, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return response;
-  } catch (err) {
-    clearTimeout(id);
-    throw err;
-  }
+/* ── Utility ─────────────────────────────────────── */
+function sendMsg(msg) {
+  return new Promise(resolve => {
+    try { chrome.runtime.sendMessage(msg, resolve); }
+    catch (e) { resolve(null); }
+  });
 }
