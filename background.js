@@ -39,12 +39,32 @@ const LIVE_BASE    = 'https://fapi.binance.com';
 const TEST_BASE    = 'https://testnet.binancefuture.com';
 const BASE_URL     = () => USE_TESTNET ? TEST_BASE : LIVE_BASE;
 
-// Heartbeat to prevent suspension
+// Heartbeat to prevent suspension (Visual only for dashboard)
 setInterval(() => {
   if (BOT_RUNNING) {
     chrome.runtime.sendMessage({ action: 'HEARTBEAT', time: Date.now() }).catch(()=>{});
   }
 }, 5000);
+
+// INITIALIZE: Restore state immediately on every SW wake-up
+(async () => {
+  const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy', 'savedSettings', 'autoRisk', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'activeTrade']);
+  if (data.botRunning) {
+    log('♻️ Service Worker Restarted', 'Restoring running state...');
+    BOT_RUNNING = true;
+    STRATEGY = data.selectedStrategy || 'RSI+EMA';
+    TRADE_SETTINGS = data.savedSettings || {};
+    API_KEY = data.apiKey;
+    API_SECRET = data.apiSecret;
+    USE_TESTNET = data.useTestnet !== false;
+    GEMINI_KEY = data.geminiKey;
+    ACTIVE_TRADE = data.activeTrade;
+    
+    await syncWithBinanceTime();
+    // Ensure alarm is active
+    chrome.alarms.create('bot-tick', { periodInMinutes: 0.5 }); 
+  }
+})();
 
 /* ── Master Message Handler ────────────────────────────── */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -171,17 +191,15 @@ async function startBot() {
   // Initial Run
   await runCycle();
   
-  // 1. Slow loop for checking entry signals (Strategy dependent)
-  // Note: Service worker may suspend, but chrome.alarms 'bot-tick' will wake it up every 1m.
-  const intervalMs = getIntervalMs();
-  if (INTERVAL_ID) clearInterval(INTERVAL_ID);
-  INTERVAL_ID = setInterval(runCycle, intervalMs);
+  // Use ALARM instead of setInterval (Crucial for MV3 stability)
+  await chrome.alarms.create('bot-tick', { periodInMinutes: 0.5 }); // Check every 30 seconds
   return true;
 }
 
 /* ── Stop Bot ───────────────────────────────────────────── */
 function stopBot() {
   BOT_RUNNING = false;
+  chrome.alarms.clear('bot-tick');
   if (INTERVAL_ID) { clearInterval(INTERVAL_ID); INTERVAL_ID = null; }
   if (MONITOR_INTERVAL_ID) { clearInterval(MONITOR_INTERVAL_ID); MONITOR_INTERVAL_ID = null; }
   chrome.storage.local.set({ botRunning: false });
@@ -1108,29 +1126,31 @@ function log(msg, detail = '') {
 /* ── Alarm fallback (keep SW alive) ─────────────────────── */
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'bot-tick') {
-     const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy', 'savedSettings']);
+     const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy', 'savedSettings', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'activeTrade']);
      if (data.botRunning) {
         BOT_RUNNING = true;
         STRATEGY = data.selectedStrategy || STRATEGY;
         TRADE_SETTINGS = data.savedSettings || TRADE_SETTINGS;
-        await loadKeys();
+        API_KEY = data.apiKey;
+        API_SECRET = data.apiSecret;
+        USE_TESTNET = data.useTestnet !== false;
+        GEMINI_KEY = data.geminiKey;
+        ACTIVE_TRADE = data.activeTrade;
+
         if (TIME_OFFSET === 0) await syncWithBinanceTime();
+        
+        // Always check active position during tick
+        if (ACTIVE_TRADE) await monitorActiveTrade().catch(()=>{});
+        
+        // Scan for new trades
         await runCycle();
      }
   }
 });
-chrome.alarms.create('bot-tick', { periodInMinutes: 1 });
 
 /* ── On SW startup: restore state ───────────────────────── */
 chrome.runtime.onStartup.addListener(async () => {
-  const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy', 'savedSettings']);
-  if (data.botRunning) {
-    await loadKeys();
-    STRATEGY = data.selectedStrategy || 'RSI+EMA';
-    TRADE_SETTINGS = data.savedSettings || {};
-    await syncWithBinanceTime();
-    await startBot();
-  }
+    // Handled by the self-invoking function at the top
 });
 
 /* ── Sync with Binance Time ─────────────────────────────── */
