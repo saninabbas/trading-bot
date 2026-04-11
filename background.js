@@ -34,6 +34,7 @@ let MONITOR_INTERVAL_ID = null;
 let LICENSE_KEY    = '';
 let LICENSE_VALID  = false;
 let TIME_OFFSET    = 0; 
+let IS_PROCESSING   = false; // Execution lock to prevent race conditions
 
 const LIVE_BASE    = 'https://fapi.binance.com';
 const TEST_BASE    = 'https://testnet.binancefuture.com';
@@ -150,7 +151,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         case 'HEARTBEAT':
           if (msg.strategy && msg.strategy !== STRATEGY && Date.now() > STRATEGY_LOCKED_UNTIL) STRATEGY = msg.strategy;
-          if (ACTIVE_TRADE) monitorActiveTrade().catch(()=>{});
+          // IMPORTANT: monitorActiveTrade is now called by the Alarm cycle, 
+          // we don't trigger it here to avoid race conditions.
           sendResponse({ ok: true });
           break;
         default:
@@ -215,7 +217,8 @@ function getIntervalMs() {
 
 /* ── Main Trading Cycle ─────────────────────────────────── */
 async function runCycle() {
-  if (!BOT_RUNNING) return;
+  if (!BOT_RUNNING || IS_PROCESSING) return;
+  IS_PROCESSING = true;
   try {
     // FORCE RELOAD KEYS BEFORE EVERY CYCLE TO ENSURE NO 'MISSING' ERRORS
     if (!API_KEY || !API_SECRET) await loadKeys();
@@ -331,6 +334,8 @@ async function runCycle() {
   } catch (e) {
     log('Cycle Error:', e.message);
     broadcastStatus(true, `⚠️ Cycle Error: ${e.message}`);
+  } finally {
+    IS_PROCESSING = false;
   }
 }
 
@@ -855,20 +860,32 @@ async function closeTrade(exitPrice, reason) {
     }
   }
 
-  // Safety: ensure exitPrice is always a valid number
+  // Safety: ensure exitPrice and entry are always valid numbers
   if (!exitPrice || isNaN(exitPrice) || exitPrice <= 0) {
     exitPrice = t.markPrice || t.entry;
-    log('⚠️ Invalid exitPrice - falling back to markPrice:', exitPrice);
+  }
+  if (!t.entry || isNaN(t.entry) || t.entry <= 0) {
+    log('❌ CRITICAL ERROR: Trade entry price is 0 or NaN. Fixing to current exit price to prevent explosion.', t);
+    t.entry = exitPrice;
   }
 
   // Final PnL calculation
   const pnlPct = t.direction === 'LONG' ? (exitPrice - t.entry) / t.entry : (t.entry - exitPrice) / t.entry;
-  const pnl = parseFloat((pnlPct * t.amount * t.leverage).toFixed(2));
+  
+  // SANITIZATION: Cap PnL at +/- 500% to prevent "ghost profits" on API errors
+  let safePnlPct = pnlPct;
+  if (Math.abs(safePnlPct) > 5) {
+      log('🛡️ PnL Sanitization applied. Cap hit (500%). Original Pct:', safePnlPct);
+      safePnlPct = safePnlPct > 0 ? 5 : -5;
+  }
+
+  const pnl = parseFloat((safePnlPct * t.amount * t.leverage).toFixed(2));
 
   const finishedTrade = {
     ...t,
     exit: parseFloat(exitPrice).toFixed(2),
     pnl,
+    pnlPct: (safePnlPct * 100).toFixed(2),
     reason,
     closeTime: new Date().toLocaleTimeString()
   };
