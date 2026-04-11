@@ -202,10 +202,54 @@ async function startBot() {
   BOT_RUNNING = true;
   await chrome.storage.local.set({ botRunning: true, selectedStrategy: STRATEGY });
   await syncTime();
+  
+  // Create the recurring 1-min alarm
   chrome.alarms.create('bot-tick', { periodInMinutes: 1 });
+  
+  // IMMEDIATELY trigger the first tick so the user sees results foran!
+  // We use a small timeout to ensure storage is updated and to let the UI react
+  setTimeout(() => {
+    chrome.alarms.get('bot-tick', (alarm) => {
+      if (alarm) {
+        // We trigger the alarm listener manually or just call the logic
+        triggerManualTick();
+      }
+    });
+  }, 500);
+
   broadcastStatus('running');
   log('🟢 Bot STARTED', STRATEGY);
   return true;
+}
+
+// Helper to trigger the tick logic manually (DRY)
+async function triggerManualTick() {
+  if (!BOT_RUNNING || IS_PROCESSING) return;
+  IS_PROCESSING = true;
+  try {
+    const d = await chrome.storage.local.get([
+      'apiKey','apiSecret','useTestnet','savedSettings','selectedStrategy','activeTrade','dailyPnl','dailyResetDate','geminiKey'
+    ]);
+    GEMINI_KEY = (d.geminiKey || '').trim();
+    API_KEY        = (d.apiKey || '').trim();
+    API_SECRET     = (d.apiSecret || '').trim();
+    USE_TESTNET    = d.useTestnet !== false;
+    TRADE_SETTINGS = d.savedSettings || TRADE_SETTINGS;
+    STRATEGY       = d.selectedStrategy || STRATEGY;
+    ACTIVE_TRADE   = d.activeTrade || null;
+    DAILY_PNL      = d.dailyPnl    || 0;
+    DAILY_RESET_DATE = d.dailyResetDate || '';
+
+    if (ACTIVE_TRADE) {
+      await monitorTrade();
+    } else {
+      await runStrategy();
+    }
+  } catch (e) {
+    log('Manual tick error', e.message);
+  } finally {
+    IS_PROCESSING = false;
+  }
 }
 
 function stopBot() {
