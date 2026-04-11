@@ -656,7 +656,7 @@ async function getLatestNews() {
 async function getBalance() {
   if (!API_KEY || !API_SECRET) return '0';
   const path   = '/fapi/v2/balance';
-  const params = `timestamp=${Date.now() + TIME_OFFSET}`;
+  const params = `timestamp=${Math.round(Date.now() + TIME_OFFSET)}`;
   const sig    = await sign(params);
   const res    = await fetchWT(`${BASE_URL()}${path}?${params}&signature=${sig}`, {
     headers: { 'X-MBX-APIKEY': API_KEY }
@@ -684,7 +684,7 @@ async function getTickerPrice(symbol) {
 
 async function setLeverage(symbol, leverage) {
   const path   = '/fapi/v1/leverage';
-  const params = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now() + TIME_OFFSET}`;
+  const params = `symbol=${symbol}&leverage=${leverage}&timestamp=${Math.round(Date.now() + TIME_OFFSET)}`;
   const sig    = await sign(params);
   await fetchWT(`${BASE_URL()}${path}`, {
     method: 'POST',
@@ -696,7 +696,7 @@ async function setLeverage(symbol, leverage) {
 async function placeMarketOrder(symbol, side, qty) {
   const binanceSide = side === 'LONG' ? 'BUY' : 'SELL';
   const path   = '/fapi/v1/order';
-  const params = `symbol=${symbol}&side=${binanceSide}&type=MARKET&quantity=${qty}&timestamp=${Date.now() + TIME_OFFSET}`;
+  const params = `symbol=${symbol}&side=${binanceSide}&type=MARKET&quantity=${qty}&timestamp=${Math.round(Date.now() + TIME_OFFSET)}`;
   const sig    = await sign(params);
   const res    = await fetchWT(`${BASE_URL()}${path}`, {
     method: 'POST',
@@ -746,7 +746,7 @@ async function syncTime() {
     const t1  = Date.now();
     const res  = await fetch(`${BASE_URL()}/fapi/v1/time`);
     const json = await res.json();
-    TIME_OFFSET = json.serverTime - (t1 + (Date.now() - t1) / 2);
+    TIME_OFFSET = Math.round(json.serverTime - (t1 + (Date.now() - t1) / 2));
   } catch (e) { TIME_OFFSET = 0; }
 }
 
