@@ -238,8 +238,11 @@ async function runCycle() {
       const coreCoins = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
       symbolsToScan = [...new Set([...symbolsToScan, ...topCoins, ...coreCoins])];
     }
+    
+    // 2. Shuffle to ensure diverse coin selection
+    symbolsToScan = shuffleArray(symbolsToScan);
 
-    // 2. Iterate and Scan
+    // 3. Iterate and Scan
     let fallbackToRSI = (STRATEGY === 'Deep AI'); 
     
     for (const symObj of symbolsToScan) {
@@ -458,9 +461,9 @@ function signalRsiEma(closes, volumes) {
   // const volEMA = calcEMA(volumes, 20);
   // if (volumes[volumes.length - 1] < volEMA[volEMA.length - 1] * 0.5) return null;
 
-  // ENTRY: Extreme Sensitivity (49/51)
-  if (lastRsi < 49) return 'LONG';
-  if (lastRsi > 51) return 'SHORT';
+  // ENTRY: Tightened for quality (45/55)
+  if (lastRsi < 45) return 'LONG';
+  if (lastRsi > 55) return 'SHORT';
   
   return null;
 }
@@ -1041,6 +1044,15 @@ function broadcastStatus(running, customMsg = null) {
   }).catch(() => {});
   // Push small log for the dashboard sidebar
   chrome.runtime.sendMessage({ action: 'DIAG_LOG', text: statusText }).catch(() => {});
+}
+
+/* ── Shuffle Helper ─────────────────────────────────────── */
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
 }
 
 async function broadcastPositionUpdate(pos) {
