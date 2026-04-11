@@ -55,7 +55,24 @@ setInterval(() => {
 
 // INITIALIZE: Restore state immediately on every SW wake-up
 (async () => {
-  const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy', 'savedSettings', 'autoRisk', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'activeTrade']);
+  const data = await chrome.storage.local.get(['botRunning', 'selectedStrategy', 'savedSettings', 'autoRisk', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'activeTrade', 'installTime', 'deviceId']);
+  
+  if (!data.installTime) {
+    INSTALL_TIME = Date.now();
+    await chrome.storage.local.set({ installTime: INSTALL_TIME });
+  } else {
+    INSTALL_TIME = data.installTime;
+  }
+
+  // Device ID Logic
+  if (!data.deviceId) {
+    DEVICE_ID = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+                   .map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    await chrome.storage.local.set({ deviceId: DEVICE_ID });
+  } else {
+    DEVICE_ID = data.deviceId;
+  }
+
   if (data.botRunning) {
     log('♻️ Service Worker Restarted', 'Restoring running state...');
     BOT_RUNNING = true;
@@ -66,19 +83,6 @@ setInterval(() => {
     USE_TESTNET = data.useTestnet !== false;
     GEMINI_KEY = data.geminiKey;
     ACTIVE_TRADE = data.activeTrade;
-    
-    // Trial Logic
-    if (!data.installTime) {
-      INSTALL_TIME = Date.now();
-      await chrome.storage.local.set({ installTime: INSTALL_TIME });
-    // Device ID Logic
-    if (!data.deviceId) {
-      DEVICE_ID = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-                     .map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-      await chrome.storage.local.set({ deviceId: DEVICE_ID });
-    } else {
-      DEVICE_ID = data.deviceId;
-    }
 
     await syncWithBinanceTime();
     // Ensure alarm is active
