@@ -729,10 +729,19 @@ async function openTrade(symbol, direction, currentPrice) {
   // Auto-Risk (50% Balance) Logic
   if (TRADE_SETTINGS.autoRisk) {
     try {
-      const balance = await getBalance();
+      let balance = 0;
+      if (mode === 'paper') {
+        const data = await chrome.storage.local.get('stats');
+        balance = parseFloat(data.stats?.balance || 1000);
+        log('🛡️ Auto-Risk (Paper):', `Using 50% of Virtual Balance ($${balance.toFixed(2)})`);
+      } else {
+        const realBal = await getBalance();
+        balance = parseFloat(realBal);
+        log('🛡️ Auto-Risk (Live):', `Using 50% of Real Balance ($${balance.toFixed(2)})`);
+      }
+
       amount = parseFloat((balance * 0.5).toFixed(2));
       if (amount < 5) amount = 5; // Safety minimum
-      log('🛡️ Auto-Risk Applied (50%):', `Margin $${amount} (Balance: $${balance})`);
     } catch (e) {
       log('⚠️ Auto-Risk failed:', e.message);
     }
