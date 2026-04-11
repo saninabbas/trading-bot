@@ -566,6 +566,14 @@ async function testConnection() {
     el.textContent = `✅ Connected! Balance: ${balance} USDT (${data.useTestnet === false ? 'Live' : 'Testnet'})`;
     el.style.color = 'var(--green)';
     showToast('✅ Binance API connected successfully!');
+
+    // Update the live balance in local stats so the UI syncs it!
+    if (!isNaN(balance)) {
+      const statsData = await chrome.storage.local.get('stats');
+      const stats = statsData.stats || { balance: 1000, todayPnl: 0, wins: 0, losses: 0, totalTrades: 0, activeTrades: 0 };
+      stats.balance = parseFloat(balance);
+      await chrome.storage.local.set({ stats });
+    }
   } catch (err) {
     el.textContent = `❌ API Error: ${err.message}`;
     el.style.color = 'var(--red)';
