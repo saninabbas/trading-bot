@@ -49,17 +49,27 @@
           <div id="ov-balance" class="metric-value green">– USDT</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">TODAY P&amp;L</div>
+          <div class="metric-label">TARGET LOG (12H)</div>
           <div id="ov-pnl" class="metric-value">$0.00</div>
+          <div class="progress-wrap" title="25% Profit Target">
+            <div id="target-progress-bar" class="progress-bar" style="width: 0%"></div>
+          </div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">WIN RATE</div>
-          <div id="ov-winrate" class="metric-value cyan">–</div>
+          <div class="metric-label">NEXT CYCLE RESET</div>
+          <div id="ov-timer" class="metric-value cyan">--:--:--</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">TOTAL TRADES</div>
           <div id="ov-total" class="metric-value">0</div>
         </div>
+      </div>
+
+      <!-- Hedge Fund Status -->
+      <div class="hf-status-row">
+        <div class="hf-status-item">Status: <span id="hf-bot-status" class="hf-val">Running</span></div>
+        <div class="hf-status-item">Scanner: <span id="hf-scanner-status" class="hf-val">Active</span></div>
+        <div class="hf-status-item">Win Rate: <span id="ov-winrate" class="hf-val">0%</span></div>
       </div>
 
       <!-- Active Position -->

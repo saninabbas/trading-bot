@@ -83,23 +83,48 @@ async function loadHealth() {
 
 /* ── Overview ────────────────────────────────────── */
 async function loadOverview() {
-  const d = await chrome.storage.local.get(['stats', 'activeTrade', 'botRunning']);
+  const d = await chrome.storage.local.get(['stats', 'activeTrade', 'botRunning', 'cycleData']);
 
   if (d.stats) {
     const s = d.stats;
     const pnl = parseFloat(s.dailyPnl || 0);
 
     document.getElementById('ov-balance').textContent = parseFloat(s.balance || 0).toFixed(2) + ' USDT';
+    
+    // Target Log (12H)
     const pnlEl = document.getElementById('ov-pnl');
     pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
     pnlEl.className   = `metric-value ${pnl >= 0 ? 'green' : 'red'}`;
+    
+    // Progress Bar (25% Target)
+    const progress = Math.min(100, Math.max(0, s.cycleProgress || 0));
+    document.getElementById('target-progress-bar').style.width = progress + '%';
 
+    // Cycle Timer
+    const timeLeft = s.cycleTimeLeft || 0;
+    document.getElementById('ov-timer').textContent = formatTimeLeft(timeLeft);
+
+    // HF Status
     document.getElementById('ov-winrate').textContent = (s.winRate || 0) + '%';
     document.getElementById('ov-total').textContent   = s.totalTrades || 0;
+    
+    // Bot Status Text
+    const statusText = d.cycleData?.profitTargetReached ? 'PAUSED (Target Hit)' : (d.botRunning ? 'RUNNING' : 'STOPPED');
+    document.getElementById('hf-bot-status').textContent = statusText;
+    document.getElementById('hf-bot-status').className = `hf-val ${d.botRunning ? 'good' : 'bad'}`;
   }
 
   renderPosition(d.activeTrade || null);
   updateBotStatus(d.botRunning ? 'running' : 'stopped');
+}
+
+function formatTimeLeft(ms) {
+  if (ms <= 0) return "RESETTING...";
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
 }
 
 function updateBotStatus(status) {
@@ -155,6 +180,10 @@ function renderPosition(pos) {
         <div class="pos-val ${pnlCls}">${pnl >= 0 ? '+' : ''}${parseFloat(pnl).toFixed(4)} (${pnlPct >= 0 ? '+' : ''}${parseFloat(pnlPct).toFixed(2)}%)</div>
       </div>
       <div class="pos-item">
+        <div class="pos-label">LOCKED PROFIT</div>
+        <div class="pos-val" style="color:var(--cyan)">${pos.lockPnL ? '$' + parseFloat(pos.lockPnL).toFixed(2) : 'NONE'}</div>
+      </div>
+      <div class="pos-item">
         <div class="pos-label">STOP LOSS</div>
         <div class="pos-val" style="color:var(--red)">$${parseFloat(pos.sl).toFixed(2)}</div>
       </div>
@@ -164,7 +193,7 @@ function renderPosition(pos) {
       </div>
       <div class="pos-item">
         <div class="pos-label">OPENED AT</div>
-        <div class="pos-val" style="font-size:12px">${pos.time || '–'}</div>
+        <div class="pos-val" style="font-size:11px">${pos.time || '–'}</div>
       </div>
     </div>
   `;

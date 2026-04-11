@@ -189,6 +189,48 @@ body {
   background: rgba(0,0,0,0.3);
   border: 1px solid var(--border2);
   border-radius: 8px;
+ /* ══════════════ HEDGE FUND UI (v3.0) ══════════════ */
+.progress-wrap {
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 10px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background: var(--cyan);
+  box-shadow: 0 0 10px var(--cyan);
+  transition: width 0.5s ease;
+}
+
+.hf-status-row {
+  display: flex;
+  gap: 15px;
+  margin-top: 15px;
+  padding: 10px 15px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid #333;
+}
+.hf-status-item {
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.hf-val {
+  color: var(--cyan);
+  font-weight: bold;
+}
+
+/* Urdu Guide styling (existing) */
+"ur-guide": {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Noto Nastaliq Urdu', serif;
+}
   padding: 9px 12px;
   color: var(--text);
   font-size: 13px;

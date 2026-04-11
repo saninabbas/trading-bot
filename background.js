@@ -27,6 +27,12 @@ let DAILY_PNL        = 0;
 let DAILY_RESET_DATE = '';
 let LAST_LOSS_TIME   = 0;
 let GEMINI_KEY       = '';
+let BOT_PAUSED_BY_TARGET = false;
+let CYCLE_DATA = {
+  startTime: 0,
+  startingCapital: 0,
+  profitTargetReached: false
+};
 
 const LIVE_BASE          = 'https://fapi.binance.com';
 const TEST_BASE          = 'https://testnet.binancefuture.com';
@@ -42,7 +48,7 @@ const COOLDOWN_MS        = 15 * 60000;   // 15 min cooldown after loss
   const d = await chrome.storage.local.get([
     'botRunning', 'selectedStrategy', 'savedSettings',
     'apiKey', 'apiSecret', 'useTestnet', 'activeTrade',
-    'installTime', 'deviceId', 'licenseKey', 'dailyPnl', 'dailyResetDate', 'geminiKey'
+    'installTime', 'deviceId', 'licenseKey', 'dailyPnl', 'dailyResetDate', 'geminiKey', 'cycleData'
   ]);
   GEMINI_KEY = (d.geminiKey || '').trim();
 
@@ -72,6 +78,7 @@ const COOLDOWN_MS        = 15 * 60000;   // 15 min cooldown after loss
   ACTIVE_TRADE = d.activeTrade || null;
   DAILY_PNL    = d.dailyPnl || 0;
   DAILY_RESET_DATE = d.dailyResetDate || '';
+  if (d.cycleData) CYCLE_DATA = d.cycleData;
 
   if (d.botRunning) {
     BOT_RUNNING = true;
@@ -267,50 +274,33 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   IS_PROCESSING = true;
   try {
-    // Reload keys fresh each tick
-    const d = await chrome.storage.local.get([
-      'apiKey','apiSecret','useTestnet','savedSettings','selectedStrategy','activeTrade','dailyPnl','dailyResetDate','geminiKey'
-    ]);
-    GEMINI_KEY = (d.geminiKey || '').trim();
-    API_KEY        = (d.apiKey || '').trim();
-    API_SECRET     = (d.apiSecret || '').trim();
-    USE_TESTNET    = d.useTestnet !== false;
-    TRADE_SETTINGS = d.savedSettings || TRADE_SETTINGS;
-    STRATEGY       = d.selectedStrategy || STRATEGY;
-    ACTIVE_TRADE   = d.activeTrade || null;
-    DAILY_PNL      = d.dailyPnl    || 0;
-    DAILY_RESET_DATE = d.dailyResetDate || '';
+    await reloadGlobalState();
 
-    // Reset daily PnL tracker at midnight
-    const today = new Date().toDateString();
-    if (DAILY_RESET_DATE !== today) {
-      DAILY_PNL = 0;
-      DAILY_RESET_DATE = today;
-      await chrome.storage.local.set({ dailyPnl: 0, dailyResetDate: today });
+    // 1. Handle 12-Hour Profit Cycle
+    await handleProfitCycle();
+    if (BOT_PAUSED_BY_TARGET) {
+      if (!ACTIVE_TRADE) {
+        IS_PROCESSING = false;
+        return; 
+      }
+      // If active trade exists, let it finish.
     }
 
-    // Monitor open trade
+    // 2. Monitor or Scan
     if (ACTIVE_TRADE) {
       await monitorTrade();
-    } else {
+    } else if (!BOT_PAUSED_BY_TARGET) {
       // Check cooldown after loss
       const cooldownLeft = COOLDOWN_MS - (Date.now() - LAST_LOSS_TIME);
       if (LAST_LOSS_TIME > 0 && cooldownLeft > 0) {
         log(`⏳ Cooldown: ${Math.ceil(cooldownLeft / 60000)}min left`);
       } else {
-        await runStrategy();
+        await scanMarketAndPickBest();
       }
     }
 
-    // Sync balance to storage
-    try {
-      const bal = await getBalance();
-      const statsData = await chrome.storage.local.get('stats');
-      const stats = statsData.stats || {};
-      stats.balance = parseFloat(bal);
-      stats.dailyPnl = DAILY_PNL;
-      await chrome.storage.local.set({ stats });
-    } catch(e) { /* balance sync is non-critical */ }
+    // 3. Sync stats
+    await syncStats();
 
   } catch (e) {
     log('Tick error', e.message);
@@ -318,6 +308,73 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     IS_PROCESSING = false;
   }
 });
+
+async function reloadGlobalState() {
+  const d = await chrome.storage.local.get([
+    'apiKey','apiSecret','useTestnet','savedSettings','selectedStrategy','activeTrade','dailyPnl','dailyResetDate','geminiKey','cycleData'
+  ]);
+  GEMINI_KEY = (d.geminiKey || '').trim();
+  API_KEY        = (d.apiKey || '').trim();
+  API_SECRET     = (d.apiSecret || '').trim();
+  USE_TESTNET    = d.useTestnet !== false;
+  TRADE_SETTINGS = d.savedSettings || TRADE_SETTINGS;
+  STRATEGY       = d.selectedStrategy || STRATEGY;
+  ACTIVE_TRADE   = d.activeTrade || null;
+  DAILY_PNL      = d.dailyPnl    || 0;
+  DAILY_RESET_DATE = d.dailyResetDate || '';
+  if (d.cycleData) CYCLE_DATA = d.cycleData;
+}
+
+async function handleProfitCycle() {
+  const now = Date.now();
+  
+  // Initialize cycle if needed
+  if (CYCLE_DATA.startTime === 0) {
+    const bal = await getBalance();
+    CYCLE_DATA.startTime = now;
+    CYCLE_DATA.startingCapital = parseFloat(bal);
+    CYCLE_DATA.profitTargetReached = false;
+    await chrome.storage.local.set({ cycleData: CYCLE_DATA });
+  }
+
+  // Check if 12-hour cycle is over
+  if (now - CYCLE_DATA.startTime >= 12 * 3600000) {
+    broadcastLog("🌅 12-Hour Cycle Reset. Starting new session...");
+    const bal = await getBalance();
+    CYCLE_DATA.startTime = now;
+    CYCLE_DATA.startingCapital = parseFloat(bal);
+    CYCLE_DATA.profitTargetReached = false;
+    BOT_PAUSED_BY_TARGET = false;
+    await chrome.storage.local.set({ cycleData: CYCLE_DATA });
+    return;
+  }
+
+  // Check if Target (25%) is reached
+  const target = CYCLE_DATA.startingCapital * 0.25;
+  if (DAILY_PNL >= target && !CYCLE_DATA.profitTargetReached) {
+    CYCLE_DATA.profitTargetReached = true;
+    BOT_PAUSED_BY_TARGET = true;
+    broadcastLog(`🏆 Target Achieved ($${DAILY_PNL.toFixed(2)}) - Bot Paused`);
+    await chrome.storage.local.set({ cycleData: CYCLE_DATA });
+  }
+  
+  if (CYCLE_DATA.profitTargetReached) {
+    BOT_PAUSED_BY_TARGET = true;
+  }
+}
+
+async function syncStats() {
+  try {
+    const bal = await getBalance();
+    const statsData = await chrome.storage.local.get('stats');
+    const stats = statsData.stats || {};
+    stats.balance = parseFloat(bal);
+    stats.dailyPnl = DAILY_PNL;
+    stats.cycleProgress = (DAILY_PNL / (CYCLE_DATA.startingCapital * 0.25)) * 100;
+    stats.cycleTimeLeft = Math.max(0, (12 * 3600000) - (Date.now() - CYCLE_DATA.startTime));
+    await chrome.storage.local.set({ stats });
+  } catch(e) {}
+}
 
 /* ══════════════════════════════════════════════════════════
    STRATEGY ENGINE
@@ -447,11 +504,133 @@ function signalBreakout(closes, highs, lows, price) {
   const prevHigh    = Math.max(...recentHighs);
   const prevLow     = Math.min(...recentLows);
 
-  // Candle must close clearly outside the range
-  const margin = (prevHigh - prevLow) * 0.005; // 0.5% buffer
+  const margin = (prevHigh - prevLow) * 0.005;
   if (price > prevHigh + margin) return 'LONG';
   if (price < prevLow  - margin) return 'SHORT';
   return null;
+}
+
+/* ══════════════════════════════════════════════════════════
+   HEDGE FUND AI SCANNER (v3.0)
+   Scans all coins and ranks them by probability score.
+══════════════════════════════════════════════════════════ */
+async function scanMarketAndPickBest() {
+  broadcastLog("🔍 Global Scanner: Identifying high-precision opportunities...");
+  
+  try {
+    const res = await fetch(`${BASE_URL()}/fapi/v1/ticker/24hr`);
+    const allTickers = await res.json();
+    
+    // 1. Filter and Sort by Volume (Focus on Top 50 liquid pairs)
+    const candidates = allTickers
+      .filter(t => t.symbol.endsWith('USDT'))
+      .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+      .slice(0, 50);
+
+    let bestSymbol = null;
+    let bestScore  = 0;
+    let bestDir    = null;
+    let bestData   = null;
+
+    // 2. Scan each top candidate deeply
+    for (const c of candidates) {
+      const symbol = c.symbol;
+      const scoreObj = await evaluateSymbol(symbol, c);
+      
+      if (scoreObj.score > bestScore && scoreObj.direction) {
+        bestScore  = scoreObj.score;
+        bestSymbol = symbol;
+        bestDir    = scoreObj.direction;
+        bestData   = scoreObj;
+      }
+    }
+
+    if (bestSymbol && bestScore >= 75) { // Minimum high-conviction threshold
+      log(`💎 Best Pair Found: ${bestSymbol} | Score: ${bestScore}%`, `Direction: ${bestDir}`);
+      broadcastLog(`💎 Best Pair Found: ${bestSymbol} | Score: ${bestScore}%`);
+      
+      // Holistic AI Filter before opening
+      if (GEMINI_KEY) {
+        const news  = await getLatestNews();
+        const trend = await get24hStats(bestSymbol);
+        const ok = await geminiConfirmSignal(bestSymbol, bestDir, bestData.price, bestData.rsi, bestData.ema50, STRATEGY, news, trend);
+        if (!ok) return;
+      }
+
+      await openTrade(bestSymbol, bestDir, bestData.price);
+    } else {
+      broadcastLog("⏳ Global Scanner: No high-conviction (>75%) setup found. Waiting...");
+    }
+
+  } catch (e) {
+    log('Scanner Error', e.message);
+  }
+}
+
+async function evaluateSymbol(symbol, ticker) {
+  try {
+    const candles = await getCandles(symbol, '15m', 100);
+    if (!candles || candles.length < 50) return { score: 0 };
+
+    const closes  = candles.map(c => parseFloat(c[4]));
+    const highs   = candles.map(c => parseFloat(c[2]));
+    const lows    = candles.map(c => parseFloat(c[3]));
+    const volumes = candles.map(c => parseFloat(c[5]));
+    const price   = closes[closes.length - 1];
+
+    // Determine Direction
+    let direction = null;
+    switch (STRATEGY) {
+      case 'RSI+EMA':   direction = signalRsiEma(closes, price);    break;
+      case 'MACD':      direction = signalMacd(closes);             break;
+      case 'Scalping':  direction = signalScalping(closes);         break;
+      case 'Breakout':  direction = signalBreakout(closes, highs, lows, price); break;
+    }
+
+    if (!direction) return { score: 0 };
+
+    // --- Scoring Weights (per User Request) ---
+    // Trend (25%) | Volume (20%) | Momentum (20%) | Indicators (15%) | Vol (10%) | Safety (10%)
+    
+    let score = 0;
+    
+    // 1. Trend Strength (25%)
+    const ema200 = calcEMA(closes, 200);
+    const inMajorTrend = direction === 'LONG' ? price > ema200[ema200.length-1] : price < ema200[ema200.length-1];
+    if (inMajorTrend) score += 25; else score += 10;
+    
+    // 2. Volume (20%)
+    const avgVol = volumes.slice(-10).reduce((a,b)=>a+b,0)/10;
+    const volCurrent = volumes[volumes.length-1];
+    if (volCurrent > avgVol * 1.5) score += 20; else score += 10;
+    
+    // 3. Momentum (20%)
+    const rsiArr = calcRSI(closes, 14);
+    const rsi = rsiArr[rsiArr.length-1];
+    const momOk = direction === 'LONG' ? (rsi > 40 && rsi < 60) : (rsi > 40 && rsi < 60); // Not overbought/oversold yet
+    if (momOk) score += 20; else score += 10;
+    
+    // 4. Indicators Alignment (15%)
+    const ema50 = calcEMA(closes, 50);
+    const emaOk = direction === 'LONG' ? price > ema50[ema50.length-1] : price < ema50[ema50.length-1];
+    if (emaOk) score += 15; else score += 5;
+    
+    // 5. Volatility (10%)
+    const priceChange = Math.abs(parseFloat(ticker.priceChangePercent));
+    if (priceChange > 2 && priceChange < 8) score += 10; else score += 5;
+    
+    // 6. Risk Safety/Liquidity (10%)
+    const hasLiquidity = parseFloat(ticker.quoteVolume) > 10000000; // 10M+ USDT
+    if (hasLiquidity) score += 10; else score += 0;
+
+    return { 
+      score, direction, price, 
+      rsi: rsi.toFixed(2), 
+      ema50: ema50[ema50.length-1].toFixed(2) 
+    };
+  } catch (e) {
+    return { score: 0 };
+  }
 }
 
 /* ══════════════════════════════════════════════════════════

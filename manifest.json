@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FUTURES AI – Pro Trader",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Automated Binance Futures bot with RSI+EMA, MACD, Scalping & Breakout strategies. Paper & Live trading.",
   "permissions": ["storage", "alarms", "notifications", "tabs"],
   "host_permissions": [
