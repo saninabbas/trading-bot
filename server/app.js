@@ -93,6 +93,11 @@ app.post('/api/validate-license', async (req, res) => {
     if (!key || !deviceId) return res.status(400).json({ ok: false, msg: "Key/DeviceID missing." });
 
     try {
+        // MASTER DEV KEY (For your personal testing)
+        if (key === "FUTURES-AI-DEV-SANIN") {
+            return res.json({ valid: true, msg: "Developer mode active." });
+        }
+
         const lic = await License.findOne({ key });
 
         if (!lic) return res.json({ valid: false, msg: "License key does not exist." });

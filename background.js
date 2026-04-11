@@ -545,7 +545,7 @@ async function scanMarketAndPickBest() {
       }
     }
 
-    if (bestSymbol && bestScore >= 75) { // Minimum high-conviction threshold
+    if (bestSymbol && bestScore >= 65) { // Adjusted from 75 to 65 for higher trade frequency
       log(`💎 Best Pair Found: ${bestSymbol} | Score: ${bestScore}%`, `Direction: ${bestDir}`);
       broadcastLog(`💎 Best Pair Found: ${bestSymbol} | Score: ${bestScore}%`);
       
@@ -559,7 +559,7 @@ async function scanMarketAndPickBest() {
 
       await openTrade(bestSymbol, bestDir, bestData.price);
     } else {
-      broadcastLog("⏳ Global Scanner: No high-conviction (>75%) setup found. Waiting...");
+      broadcastLog("⏳ Global Scanner: No decent (>65%) setup found. Waiting...");
     }
 
   } catch (e) {
