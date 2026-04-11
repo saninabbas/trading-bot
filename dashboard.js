@@ -79,7 +79,7 @@ function startClock() {
 async function loadAllData() {
   const data = await chrome.storage.local.get([
     'botRunning', 'selectedStrategy', 'stats',
-    'tradeLog', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey'
+    'tradeLog', 'apiKey', 'apiSecret', 'useTestnet', 'geminiKey', 'autoRisk'
   ]);
 
   if (data.botRunning) {
@@ -262,7 +262,12 @@ async function toggleBotDashboard() {
       if (res && res.ok) {
         botActive = true;
         applyBotUI(true);
-        await chrome.storage.local.set({ botRunning: true, selectedStrategy: selectedStrat, savedSettings: settings });
+        await chrome.storage.local.set({ 
+          botRunning: true, 
+          selectedStrategy: selectedStrat, 
+          savedSettings: settings,
+          autoRisk: settings.autoRisk 
+        });
         showToast(`🚀 Bot started — ${selectedStrat}`);
       } else {
         const errMsg = (res && res.error) ? res.error : 'License required or API error';
@@ -286,6 +291,7 @@ function getTradeSettings() {
   return {
     symbol:    document.getElementById('d-symbol')?.value    || 'BTCUSDT',
     amount:    document.getElementById('d-amount')?.value    || '50',
+    autoRisk:  document.getElementById('d-auto-risk')?.checked || false,
     risk:      '2',
     leverage:  document.getElementById('lever-range')?.value || '20',
     stopLoss:  document.getElementById('d-sl')?.value        || '0.5',
@@ -654,6 +660,9 @@ function updateActivePositionUI(pos) {
   const dir = pos.direction || 'LONG';
   badge.textContent = dir;
   badge.className = 'pos-badge ' + dir.toLowerCase();
+
+  const amtEl = document.getElementById('ap-amount');
+  if (amtEl) amtEl.textContent = parseFloat(pos.amount || 0).toFixed(2);
 
   const pnl = parseFloat(pos.pnl);
   pnlEl.textContent = (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2);

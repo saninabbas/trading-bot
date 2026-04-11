@@ -676,15 +676,15 @@ async function openTrade(symbol, direction, currentPrice) {
 
   let amount = parseFloat(TRADE_SETTINGS.amount || 50);
 
-  // Auto-Compounding Logic
-  if (TRADE_SETTINGS.autoCompound) {
+  // Auto-Risk (50% Balance) Logic
+  if (TRADE_SETTINGS.autoRisk) {
     try {
       const balance = await getBalance();
-      const calculatedAmount = (balance * riskPct * leverage);
-      amount = Math.max(10, parseFloat(calculatedAmount.toFixed(2))); // Min $10 safety
-      log('📈 Auto-Compound:', `Balanced logic used. Amount: $${amount}`);
+      amount = parseFloat((balance * 0.5).toFixed(2));
+      if (amount < 5) amount = 5; // Safety minimum
+      log('🛡️ Auto-Risk Applied (50%):', `Margin $${amount} (Balance: $${balance})`);
     } catch (e) {
-      log('⚠️ Compounding failed:', e.message);
+      log('⚠️ Auto-Risk failed:', e.message);
     }
   }
 

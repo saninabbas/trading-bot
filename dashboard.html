@@ -163,6 +163,10 @@
               <option value="live">🔴 Live Trading (Real Money)</option>
             </select>
           </div>
+          <div class="form-group" style="flex-direction:row; justify-content:space-between; align-items:center; margin-top:10px">
+            <label class="form-label" style="margin-bottom:0">Risk 50% of Balance</label>
+            <input type="checkbox" id="d-auto-risk" style="width:20px; height:20px; cursor:pointer" checked>
+          </div>
         </div>
 
         <div class="control-card">
@@ -210,6 +214,10 @@
             <div class="active-stat">
               <span class="as-label">Take Profit</span>
               <span class="as-value green-text" id="ap-tp">0.00</span>
+            </div>
+            <div class="active-stat">
+              <span class="as-label">Initial Margin ($)</span>
+              <span class="as-value cyan-text" style="font-weight:700" id="ap-amount">0.00</span>
             </div>
           </div>
           <div class="active-footer" style="display:flex; justify-content:space-between; align-items:center;">
