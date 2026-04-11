@@ -103,7 +103,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 2. ASYNC HANDLERS
   const handleMessage = async () => {
     try {
-      if (['START_BOT', 'FORCE_TRADE', 'TEST_CONNECTION', 'CLOSE_POSITION', 'FORCE_CLEAR_TRADE', 'MANUAL_TRADE'].includes(msg.action)) {
+      if (['START_BOT', 'FORCE_TRADE', 'TEST_CONNECTION', 'CLOSE_POSITION', 'FORCE_CLEAR_TRADE', 'MANUAL_TRADE', 'CHAT_QUERY'].includes(msg.action)) {
         await loadKeys();
         if (msg.action === 'START_BOT' || msg.action === 'MANUAL_TRADE' || msg.action === 'FORCE_TRADE') {
            if (!isSubscriptionActive()) throw new Error('Subscription Required. Your 1-hour trial has expired.');
@@ -112,9 +112,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       switch (msg.action) {
         case 'CHAT_QUERY':
-          const reply = await handleChatQuery(msg.query);
-          sendResponse({ reply });
-          return true;
+          // Run immediately and ensure sendResponse is called without hanging
+          handleChatQuery(msg.query).then(reply => {
+            sendResponse({ reply });
+          }).catch(e => {
+            sendResponse({ reply: 'Error: ' + e.message });
+          });
+          return true; // We must return true right away inside the switch (not break), because the outer function is async and we need to tell Chrome we're responding asynchronously
         case 'VALIDATE_KEY':
           const isValid = await validateLicenseKey(msg.key);
           sendResponse({ valid: isValid });
@@ -200,14 +204,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 /* ── Load Keys from Storage ─────────────────────────────── */
 async function loadKeys() {
-  const data = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet', 'activeTrade', 'geminiKey', 'licenseKey', 'licenseStatus']);
+  const data = await chrome.storage.local.get(['apiKey', 'apiSecret', 'useTestnet', 'activeTrade', 'geminiKey', 'licenseKey', 'licenseStatus', 'deviceId', 'installTime']);
   API_KEY      = (data.apiKey || '').trim();
   API_SECRET   = (data.apiSecret || '').trim();
   USE_TESTNET  = data.useTestnet !== false;
+  GEMINI_KEY   = (data.geminiKey || '').trim();
   LICENSE_KEY   = (data.licenseKey || '').trim();
-  LICENSE_VALID = await validateLicenseKey(LICENSE_KEY);
   INSTALL_TIME  = data.installTime || Date.now();
   DEVICE_ID     = data.deviceId || 'UNKNOWN';
+  LICENSE_VALID = await validateLicenseKey(LICENSE_KEY);
 }
 
 /* ── Start Bot ──────────────────────────────────────────── */
