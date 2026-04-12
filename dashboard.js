@@ -372,8 +372,8 @@ async function loadLicenseStatus() {
 
 async function activateLicense() {
   const key = document.getElementById('license-key-input').value.trim().toUpperCase();
-  if (!key.startsWith('FUTURES-AI-PRO-')) {
-    showResult('license', '❌ Invalid format. Must start with FUTURES-AI-PRO-', 'err'); return;
+  if (!key) {
+    showResult('license', '❌ Please enter a license key', 'err'); return;
   }
 
   const r = await sendMsg({ action: 'VALIDATE_KEY', key });

@@ -57,7 +57,7 @@ const FAQS = [
   { q: "When do I get license key?", a: "Instantly. As soon as the blockchain confirms your transaction, our API displays your unique hardware-locked key." },
   { q: "Can one key work on two devices?", a: "No, one device only. Standard licenses are bound to a generated DeviceID for security verification." },
   { q: "Refund available?", a: "License delivered = no refund. Duplicate payment or unresolved technical issue = case-by-case review." },
-  { q: "Do I need experience?", a: "No, beginner friendly. We have an 'Easy Mode' that sets up safe parameters. You just observe." }
+  { q: "Do I need experience?", a: "No, beginner friendly. We have an &apos;Easy Mode&apos; that sets up safe parameters. You just observe." }
 ];
 
 /* --- COMPONENTS --- */
@@ -333,7 +333,7 @@ const Reviews = () => {
               <div className="flex text-gold-500 mb-4">
                 {[...Array(r.rating)].map((_, j) => <Star key={j} className="w-4 h-4 fill-current"/>)}
               </div>
-              <p className="text-gray-300 italic mb-6">"{r.text}"</p>
+              <p className="text-gray-300 italic mb-6">&quot;{r.text}&quot;</p>
               <div className="flex items-center justify-between border-t border-gray-900 pt-4 mt-auto">
                 <div className="font-bold text-white">{r.name}</div>
                 <div className="text-xs text-gray-500 uppercase tracking-widest">{r.location}</div>
