@@ -337,7 +337,6 @@ const Pricing = () => {
             <button className="w-full py-3 rounded border border-gray-700 text-white font-bold hover:bg-gray-800 transition-colors">Select Plan</button>
           </div>
         </div>
-        </div>
       </div>
 
       <AnimatePresence>
