@@ -10,8 +10,9 @@ app.use(express.json());
 app.use(cors());
 
 // Health Check (To fix the 404 you see on the main page)
-app.get('/', (req, res) => {
-    res.send("🚀 FUTURES AI License Server is LIVE and Running!");
+app.get('/', async (req, res) => {
+    const dbStatus = mongoose.connection.readyState === 1 ? "Connected ✅" : "Disconnected ❌";
+    res.send(`🚀 FUTURES AI License Server is LIVE!<br><b>Database Status:</b> ${dbStatus}<br><br>If disconnected, please check your MONGO_URI in Vercel settings.`);
 });
 
 // CONFIG
@@ -111,14 +112,18 @@ app.post('/api/validate-license', async (req, res) => {
         }
 
         if (lic.deviceId !== deviceId) {
-            return res.json({ valid: false, msg: "Locked to another device." });
+            return res.json({ valid: false, msg: "Locked to another device. Contact support." });
         }
 
         res.json({ valid: true, msg: "Verified." });
 
     } catch (e) {
         console.error("Validation Error:", e);
-        res.status(500).json({ valid: false, msg: "Auth error: " + e.message });
+        // More descriptive error if it's a connection issue
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(500).json({ valid: false, msg: "Server Error: Database isolated or disconnected." });
+        }
+        res.status(500).json({ valid: false, msg: "Validation error: " + e.message });
     }
 });
 
