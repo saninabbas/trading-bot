@@ -102,7 +102,7 @@ app.post('/api/validate-license', async (req, res) => {
 
         if (!lic) return res.json({ valid: false, msg: "License key does not exist." });
         if (lic.status !== 'active') return res.json({ valid: false, msg: "License blocked." });
-        if (Date.now() > lic.expiry) return { valid: false, msg: "License expired." };
+        if (Date.now() > lic.expiry) return res.json({ valid: false, msg: "License expired." });
 
         if (!lic.deviceId) {
             lic.deviceId = deviceId;
