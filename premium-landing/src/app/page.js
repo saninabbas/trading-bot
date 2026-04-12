@@ -256,6 +256,29 @@ const HowItWorks = () => {
 
 const Pricing = () => {
   const [timeLeft, setTimeLeft] = useState(3600);
+  const [showModal, setShowModal] = useState(false);
+  const [txHash, setTxHash] = useState('');
+  const [status, setStatus] = useState({ loading: false, msg: '', key: null });
+
+  const handleVerify = async () => {
+    if (!txHash.trim()) { setStatus({ ...status, msg: 'TX Hash is required.' }); return; }
+    setStatus({ loading: true, msg: '🔍 Checking BSC Blockchain...', key: null });
+    try {
+      const res = await fetch('https://trading-bot-liart.vercel.app/api/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txHash })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setStatus({ loading: false, msg: '✅ Payment Verified!', key: data.key });
+      } else {
+        setStatus({ loading: false, msg: '❌ ' + data.msg, key: null });
+      }
+    } catch(e) {
+      setStatus({ loading: false, msg: '❌ Server Error. Try again.', key: null });
+    }
+  };
 
   useEffect(() => {
     const timer = setInterval(() => setTimeLeft(t => t > 0 ? t - 1 : 0), 1000);
@@ -299,7 +322,7 @@ const Pricing = () => {
               <li className="flex items-center"><ShieldCheck className="w-4 h-4 mr-2 text-gold-500"/> Hedge Fund v3.0 Logic</li>
               <li className="flex items-center"><ShieldCheck className="w-4 h-4 mr-2 text-gold-500"/> Setup Guide + Updates</li>
             </ul>
-            <button className="w-full py-4 rounded bg-gold-gradient text-black font-extrabold uppercase tracking-wider glow-gold-hover transition-all">Buy Standard Key</button>
+            <button onClick={() => setShowModal(true)} className="w-full py-4 rounded bg-gold-gradient text-black font-extrabold uppercase tracking-wider glow-gold-hover transition-all">Buy Standard Key</button>
           </motion.div>
 
           {/* Plan 3 */}
@@ -314,7 +337,42 @@ const Pricing = () => {
             <button className="w-full py-3 rounded border border-gray-700 text-white font-bold hover:bg-gray-800 transition-colors">Select Plan</button>
           </div>
         </div>
+        </div>
       </div>
+
+      <AnimatePresence>
+        {showModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="bg-[#050505] border border-gray-800 p-6 rounded-xl max-w-md w-full relative">
+              <button onClick={() => setShowModal(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X className="w-5 h-5"/></button>
+              <h3 className="text-2xl font-bold text-white mb-4">Complete Payment</h3>
+              <div className="bg-black border border-gray-900 p-4 rounded-lg mb-4 text-center">
+                <p className="text-gray-400 text-sm mb-2">Send precisely <strong className="text-white">12 USDT (BEP20)</strong> to:</p>
+                <div className="text-gold-500 font-mono text-sm break-all mb-2">0x9d35215728112c055c8d2472560d7e3ec58df135</div>
+              </div>
+              
+              <p className="text-gray-400 text-sm mb-2">After sending, paste your TXID/Hash below:</p>
+              <input type="text" value={txHash} onChange={(e) => setTxHash(e.target.value)} placeholder="0x..." className="w-full bg-black border border-gray-800 text-white p-3 rounded mb-4 outline-none focus:border-gold-500" />
+              
+              <button onClick={handleVerify} disabled={status.loading} className="w-full bg-gold-gradient text-black font-bold py-3 rounded disabled:opacity-50">
+                {status.loading ? 'Verifying...' : '✅ I Have Paid'}
+              </button>
+
+              {status.msg && (
+                <div className="mt-4 p-4 rounded bg-gray-900 border border-gray-800">
+                  <p className={`text-sm ${status.key ? 'text-green-500' : 'text-red-400'} font-bold`}>{status.msg}</p>
+                  {status.key && (
+                    <div className="mt-2">
+                       <p className="text-xs text-gray-400 mb-1">Your License Key:</p>
+                       <div className="bg-black p-2 border border-gold-500/30 text-gold-500 font-mono text-center rounded">{status.key}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </section>
   );
 };
