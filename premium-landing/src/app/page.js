@@ -75,7 +75,7 @@ const Navbar = () => {
               <Zap className="text-gold-500 w-6 h-6" />
             </div>
             <span className="font-bold text-xl tracking-wider uppercase text-white">
-              AntiGravity <span className="text-gold-gradient">Bot</span>
+              FUTURES <span className="text-gold-gradient">AI</span>
             </span>
           </div>
           <div className="hidden md:block">
@@ -443,7 +443,7 @@ const Footer = () => {
             <Zap className="text-gold-500 w-4 h-4" />
           </div>
           <span className="font-bold text-lg tracking-wider uppercase text-white">
-            AntiGravity <span className="text-gold-gradient">Bot</span>
+            FUTURES <span className="text-gold-gradient">AI</span>
           </span>
         </div>
         <div className="space-x-6 text-sm text-gray-500 mb-6 font-medium uppercase tracking-wider">
@@ -451,7 +451,7 @@ const Footer = () => {
           <a href="#" className="hover:text-gold-400 transition-colors">Terms of Service</a>
           <a href="#" className="hover:text-gold-400 transition-colors">Contact</a>
         </div>
-        <p className="text-gray-700 text-xs">&copy; {new Date().getFullYear()} AntiGravity Bot. High Risk Warning: Cryptocurrency trading carries a high level of risk.</p>
+        <p className="text-gray-700 text-xs">&copy; {new Date().getFullYear()} FUTURES AI. High Risk Warning: Cryptocurrency trading carries a high level of risk.</p>
       </div>
     </footer>
   );
