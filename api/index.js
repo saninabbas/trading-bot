@@ -9,10 +9,19 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Health Check (To fix the 404 you see on the main page)
+// Health Check
 app.get('/', async (req, res) => {
     const dbStatus = mongoose.connection.readyState === 1 ? "Connected ✅" : "Disconnected ❌";
-    res.send(`🚀 FUTURES AI License Server is LIVE!<br><b>Database Status:</b> ${dbStatus}<br><br>If disconnected, please check your MONGO_URI in Vercel settings.`);
+    const hasUri = !!process.env.MONGO_URI;
+    res.send(`
+        <body style="font-family:sans-serif; background:#0a0a0a; color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh;">
+            <h1 style="color:#00ffcc;">🚀 FUTURES AI License Server</h1>
+            <p><b>Database Status:</b> ${dbStatus}</p>
+            <p><b>MONGO_URI Set:</b> ${hasUri ? "YES ✅" : "NO ❌ (Missing in Vercel Settings)"}</p>
+            <hr style="width:50%; border:0.5px solid #333;">
+            <p style="font-size:0.8em; color:#888;">If disconnected, ensure you have added <b>0.0.0.0/0</b> to MongoDB Network Access and set <b>MONGO_URI</b> in Vercel.</p>
+        </body>
+    `);
 });
 
 // CONFIG
