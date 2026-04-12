@@ -88,7 +88,7 @@ const Navbar = () => {
             </div>
           </div>
           <div className="hidden md:flex space-x-4 items-center">
-            <a href="#login" className="text-gray-300 hover:text-white transition-colors text-sm font-medium uppercase">Login</a>
+            <a href="#faq" className="text-gray-300 hover:text-white transition-colors text-sm font-medium uppercase">Support</a>
             <a href="#pricing" className="bg-gold-gradient text-black font-bold px-6 py-2 rounded-md glow-gold glow-gold-hover transition-all duration-300 uppercase tracking-wider">
               Buy Now
             </a>
