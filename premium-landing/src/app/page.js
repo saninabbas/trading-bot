@@ -308,7 +308,7 @@ const Pricing = () => {
               <li className="flex items-center"><ShieldCheck className="w-4 h-4 mr-2 text-gold-500"/> 2 Devices Locked</li>
               <li className="flex items-center"><ShieldCheck className="w-4 h-4 mr-2 text-gold-500"/> Priority Support</li>
             </ul>
-            <button className="w-full py-3 rounded border border-gray-700 text-white font-bold hover:bg-gray-800 transition-colors">Select Plan</button>
+            <button onClick={() => setShowModal(true)} className="w-full py-3 rounded border border-gray-700 text-white font-bold hover:bg-gray-800 transition-colors">Buy Pro Key</button>
           </div>
 
           {/* Plan 2: Main */}
@@ -334,7 +334,7 @@ const Pricing = () => {
               <li className="flex items-center"><ShieldCheck className="w-4 h-4 mr-2 text-gold-500"/> Unlimited Devices</li>
               <li className="flex items-center"><ShieldCheck className="w-4 h-4 mr-2 text-gold-500"/> VIP Support Channel</li>
             </ul>
-            <button className="w-full py-3 rounded border border-gray-700 text-white font-bold hover:bg-gray-800 transition-colors">Select Plan</button>
+            <button onClick={() => setShowModal(true)} className="w-full py-3 rounded border border-gray-700 text-white font-bold hover:bg-gray-800 transition-colors">Buy Lifetime Key</button>
           </div>
         </div>
       </div>
