@@ -117,7 +117,8 @@ app.post('/api/validate-license', async (req, res) => {
         res.json({ valid: true, msg: "Verified." });
 
     } catch (e) {
-        res.status(500).json({ valid: false, msg: "Auth error." });
+        console.error("Validation Error:", e);
+        res.status(500).json({ valid: false, msg: "Auth error: " + e.message });
     }
 });
 
